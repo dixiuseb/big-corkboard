@@ -61,6 +61,9 @@ type Board = {
   nodes: (NoteCard | ClusterNode)[]
   edges: BoardEdge[]
   viewport: { x: number; y: number; zoom: number }
+  // User-defined label per color (e.g. amber → "Characters", sky → "Scenes").
+  // Omitted colors have no label. UI reads this to render the bottom legend.
+  colorLabels?: Partial<Record<Color, string>>
 }
 ```
 
@@ -121,7 +124,17 @@ This way the tab list can be loaded instantly without deserializing every board'
 - **Soft pastel palette** — light backgrounds with legible `text-stone-800` text. Six colors: amber, sky, teal, rose, violet, lime.
 - **Semantic use** (e.g. characters vs scenes vs themes) makes the board scannable at a glance.
 - Notes inside a cluster can be mixed colors; the panel shows each card's own color.
-- A legend (editable per board) is planned for a later polish pass.
+
+#### Color labels / legend (v2)
+
+Each color can have a **user-defined label per board** (stored in `Board.colorLabels`). The data model field is included from v1 so no migration is needed when the UI ships.
+
+**Planned UI:**
+- A **legend strip along the bottom** of the canvas (above the board tabs) shows a color swatch + label for each color that has been assigned a name. Unlabeled colors don't appear.
+- A subtle **"+ Assign category"** button at the end of the strip opens an inline editor for any of the six colors.
+- Clicking an existing legend chip opens a small popover to rename or clear that color's label.
+
+**v3 extension:** a **"Filter by category"** view that shows all notes (canvas + inside clusters) belonging to a chosen color — useful once a board is large and dense.
 
 ### Connections (edges)
 
@@ -167,7 +180,12 @@ This way the tab list can be loaded instantly without deserializing every board'
 7. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
 8. **Drag-out from cluster panel** — drag a note from the side panel back onto the canvas. *(Deferred — most complex interaction.)*
 
-Sync/auth, deeply nested boards, and the color legend editor sit **after** the above.
+Post-v1 backlog (in rough priority order):
+- **Color label legend** (v2) — legend strip + "Assign category" editor at the bottom of the canvas.
+- **Filter by category** (v3) — list all notes of a given color across the whole board.
+- Sync / auth (Supabase or similar).
+- Deeply nested boards (clusters containing sub-boards).
+- Color legend editor.
 
 ### Mobile apps (future)
 
