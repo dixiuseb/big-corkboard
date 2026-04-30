@@ -125,6 +125,23 @@ This way the tab list can be loaded instantly without deserializing every board'
 - **Semantic use** (e.g. characters vs scenes vs themes) makes the board scannable at a glance.
 - Notes inside a cluster can be mixed colors; the panel shows each card's own color.
 
+#### Light and dark mode
+
+The app supports light and dark mode, but the two areas are handled independently:
+
+**Note card colors — theme-agnostic (v1)**
+- Note card backgrounds, borders, and text are **always the pastel palette** regardless of system theme. The cards are designed around these specific colors.
+- Placeholder text inside notes is **always dark** (`text-stone-500` or similar) — not a `dark:` variant — because the note surface is always light. Using a `dark:` text variant here would make placeholder text illegible on the pastel background when the OS is in dark mode.
+
+**Chrome (board + UI) — theme-adaptive (v1)**
+- The **canvas background**, **toolbar**, **panel backgrounds**, and **action buttons** all respond to light/dark mode.
+- Light mode: white/near-white canvas, light toolbar, dark button text.
+- Dark mode: dark canvas, dark toolbar, light button text.
+
+**Future palette expansions**
+- **v2**: a second set of **neon/vivid note colors** designed to pop on a dark canvas. Users could switch between the pastel set and the neon set per board.
+- **v3**: **user-defined colors and themes** — custom hex values per note, custom board backgrounds, full palette control.
+
 #### Color labels / legend (v2)
 
 Each color can have a **user-defined label per board** (stored in `Board.colorLabels`). The data model field is included from v1 so no migration is needed when the UI ships.
@@ -187,7 +204,9 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 
 Post-v1 backlog (in rough priority order):
 - **Color label legend** (v2) — legend strip + "Assign category" editor at the bottom of the canvas.
+- **Neon note palette** (v2) — a second set of vivid colors designed for dark canvases; switchable per board.
 - **Filter by category** (v3) — list all notes of a given color across the whole board.
+- **User-defined colors and themes** (v3) — custom hex values per note, custom board backgrounds, full palette control.
 - Sync / auth (Supabase or similar).
 - Deeply nested boards (clusters containing sub-boards).
 - Color legend editor.
