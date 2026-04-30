@@ -169,9 +169,10 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 
 ### Drag-to-pin
 
-- Drag a loose note over a cluster → cluster highlights → release → note appended to the **end** of the cluster's notes list and removed from the canvas.
-- The note's center must be inside the cluster's bounds to trigger the drop (not just overlapping the edge).
-- **Undo** (`Cmd+Z` / `Ctrl+Z`): single level — restores the note to its previous canvas position and removes it from the cluster.
+- **Drag a loose note over a cluster** → cluster highlights → release → note appended to the **end** of the cluster's notes list and removed from the canvas.
+- **Drag a loose note over another standalone note** → target note highlights → release → a new cluster is created at the target note's position containing both notes (target note first, dragged note appended). Both source notes are removed from the canvas.
+- The dragged note's center must be inside the target's bounds to trigger the drop (not just overlapping the edge).
+- **Undo** (`Cmd+Z` / `Ctrl+Z`): single level — restores the previous state (note back to canvas / cluster dissolved back to two standalone notes).
 
 ### Persistence
 
@@ -196,7 +197,7 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 1. **Canvas + note nodes** ✓ — full-screen canvas; notecards with color, drag, double-click-to-edit.
 2. **Selection popup** ✓ — `NodeToolbar` with color, font size, B/I/U, create-cluster, delete.
 3. **Cluster nodes** ✓ — stacked visual; expand button; side panel with editable notes; cluster-level delete and un-cluster.
-4. **Drag-to-pin** — center-of-note detection; cluster highlights; appends to end of list; single-level undo.
+4. **Drag-to-pin** — center-of-note detection; cluster/note highlights; note-on-cluster appends; note-on-note creates new cluster; single-level undo.
 5. **Connections** — labeled edges; handles on hover only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
 6. **Persistence** — debounced auto-save; separate board-list and canvas-state keys; first-load default board; clear board dialog.
 7. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
