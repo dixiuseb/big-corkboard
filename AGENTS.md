@@ -41,7 +41,7 @@ full spec and data model.
 - `corkboard:board:{id}` — full canvas state per board
 
 ## Current roadmap position
-Steps 1–3 done. Currently on step 4 (drag-to-pin).
+Steps 1–4 done. Currently on step 5 (connections).
 See README.md for full roadmap.
 
 ## What to avoid
