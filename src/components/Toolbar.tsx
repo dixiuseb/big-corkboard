@@ -39,18 +39,18 @@ export function Toolbar() {
 
   return (
     <Panel position="top-center" className="m-2">
-      <div className="flex items-center gap-2 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/90 px-3 py-2 shadow-lg backdrop-blur-md">
+      <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/90 px-3 py-2 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-neutral-800/90">
         <button
           type="button"
           onClick={addNote}
-          className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)] transition-opacity hover:opacity-80"
+          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add note
         </button>
         <button
           type="button"
           onClick={addCluster}
-          className="rounded-lg border border-[var(--foreground)]/20 px-3 py-1.5 text-sm font-medium text-[var(--foreground)]/70 transition-colors hover:border-[var(--foreground)]/40 hover:text-[var(--foreground)]"
+          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add cluster
         </button>

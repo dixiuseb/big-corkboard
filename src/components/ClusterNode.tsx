@@ -104,7 +104,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
           {/* First note preview */}
           <p className="min-h-[88px] select-none whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed opacity-75">
             {frontNote?.body || (
-              <span className="opacity-40 italic">Empty cluster</span>
+              <span className="opacity-40 italic">Note...</span>
             )}
           </p>
         </div>

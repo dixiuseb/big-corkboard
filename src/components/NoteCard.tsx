@@ -112,7 +112,7 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
     <>
       {/* ── Selection popup ── */}
       <NodeToolbar isVisible={showToolbar} position={Position.Top} offset={10}>
-        <div className="flex items-center gap-1 rounded-xl border border-black/10 bg-white px-2 py-1.5 shadow-xl">
+        <div className="flex items-center gap-1 rounded-xl border border-black/10 bg-white px-2 py-1.5 shadow-xl dark:border-white/10 dark:bg-neutral-800">
           {/* Color swatches */}
           {NOTE_COLOR_KEYS.map((key) => (
             <button
@@ -120,12 +120,12 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
               type="button"
               title={NOTE_COLOR_META[key].label}
               onClick={() => setColor(key)}
-              className={`h-6 w-6 rounded-md ring-2 ring-offset-1 transition-transform hover:scale-110 ${NOTE_COLOR_META[key].swatch} ${colorKey === key ? "ring-black/30" : "ring-transparent"}`}
+              className={`h-6 w-6 rounded-md ring-2 ring-offset-1 transition-transform hover:scale-110 dark:ring-offset-neutral-800 ${NOTE_COLOR_META[key].swatch} ${colorKey === key ? "ring-black/30 dark:ring-white/40" : "ring-transparent"}`}
               aria-label={`Color: ${NOTE_COLOR_META[key].label}`}
             />
           ))}
 
-          <div className="mx-1 h-5 w-px bg-black/10" />
+          <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
 
           {/* Font size */}
           {FONT_SIZES.map(({ key, label }) => (
@@ -135,13 +135,13 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
               title={`Font size: ${label}`}
               onClick={() => setFontSize(key)}
               aria-pressed={fontSize === key}
-              className={`flex h-7 min-w-[1.75rem] items-center justify-center rounded-md px-1 text-xs font-medium transition-colors ${fontSize === key ? "bg-black/10 text-black" : "text-black/50 hover:bg-black/5 hover:text-black"}`}
+              className={`flex h-7 min-w-[1.75rem] items-center justify-center rounded-md px-1 text-xs font-medium transition-colors ${fontSize === key ? "bg-black/10 text-black dark:bg-white/15 dark:text-white" : "text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"}`}
             >
               {label}
             </button>
           ))}
 
-          <div className="mx-1 h-5 w-px bg-black/10" />
+          <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
 
           {/* Bold / Italic / Underline */}
           {(
@@ -157,20 +157,20 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
               title={title}
               onClick={() => toggleFormat(key)}
               aria-pressed={!!fmt[key]}
-              className={`flex h-7 w-7 items-center justify-center rounded-md text-sm transition-colors ${cls} ${fmt[key] ? "bg-black/10 text-black" : "text-black/50 hover:bg-black/5 hover:text-black"}`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md text-sm transition-colors ${cls} ${fmt[key] ? "bg-black/10 text-black dark:bg-white/15 dark:text-white" : "text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"}`}
             >
               {label}
             </button>
           ))}
 
-          <div className="mx-1 h-5 w-px bg-black/10" />
+          <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
 
           {/* Create cluster */}
           <button
             type="button"
             title="Create cluster"
             onClick={createCluster}
-            className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-black/50 transition-colors hover:bg-black/5 hover:text-black"
+            className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-black/50 transition-colors hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="8" height="8" rx="1" />
@@ -181,14 +181,14 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
             Cluster
           </button>
 
-          <div className="mx-1 h-5 w-px bg-black/10" />
+          <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
 
           {/* Delete */}
           <button
             type="button"
             title="Delete note"
             onClick={deleteNote}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-black/40 transition-colors hover:bg-red-50 hover:text-red-500"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-black/40 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-white/30 dark:hover:bg-red-950/40 dark:hover:text-red-400"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="3 6 5 6 21 6" />
