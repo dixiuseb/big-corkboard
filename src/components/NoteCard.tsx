@@ -28,6 +28,7 @@ export type NoteNodeData = {
   body: string;
   colorKey?: NoteColorKey;
   formatting?: NoteFormatting;
+  isDropTarget?: boolean;
 };
 
 export type NoteFlowNode = Node<NoteNodeData, "noteCard">;
@@ -55,6 +56,7 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
   const palette = NOTE_COLOR_META[colorKey];
   const fmt = data.formatting ?? {};
   const fontSize: NoteFontSize = fmt.fontSize ?? "md";
+  const isDropTarget = !!data.isDropTarget;
 
   const updateBody = (body: string) => updateNodeData(id, { body });
 
@@ -212,7 +214,7 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
 
       <div
         onDoubleClick={!editing ? enterEditMode : undefined}
-        className={`flex w-[240px] cursor-grab flex-col rounded-lg border shadow-md outline-none ring-2 ring-offset-1 transition-shadow active:cursor-grabbing ${palette.cardClass} ${selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"} ${editing ? "cursor-default active:cursor-default" : ""}`}
+        className={`flex w-[240px] cursor-grab flex-col rounded-lg border shadow-md outline-none ring-2 ring-offset-2 transition-all active:cursor-grabbing ${palette.cardClass} ${isDropTarget ? `${palette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"} ${editing ? "cursor-default active:cursor-default" : ""}`}
       >
         {editing ? (
           <textarea

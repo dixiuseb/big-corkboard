@@ -27,11 +27,9 @@ import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
-type PinUndoAction = {
-  node: NoteFlowNode;
-  clusterId: string;
-  addedNoteId: string;
-};
+type PinUndoAction =
+  | { kind: "noteToCluster"; draggedNode: NoteFlowNode; clusterId: string; addedNoteId: string }
+  | { kind: "noteToNote"; draggedNode: NoteFlowNode; targetNode: NoteFlowNode; newClusterId: string };
 
 const initialNodes: BoardNode[] = [];
 const initialEdges: Edge[] = [];
@@ -174,14 +172,16 @@ export function Board() {
 
     let foundId: string | null = null;
     for (const n of nodesRef.current) {
-      if (n.type !== "clusterNode") continue;
-      const cw = n.measured?.width ?? 240;
-      const ch = n.measured?.height ?? 160;
+      // Skip the node being dragged.
+      if (n.id === draggedNode.id) continue;
+      if (n.type !== "clusterNode" && n.type !== "noteCard") continue;
+      const nw = n.measured?.width ?? 240;
+      const nh = n.measured?.height ?? (n.type === "clusterNode" ? 160 : 120);
       if (
         center.x >= n.position.x &&
-        center.x <= n.position.x + cw &&
+        center.x <= n.position.x + nw &&
         center.y >= n.position.y &&
-        center.y <= n.position.y + ch
+        center.y <= n.position.y + nh
       ) {
         foundId = n.id;
         break;
@@ -193,11 +193,17 @@ export function Board() {
       prevDropTargetRef.current = foundId;
       setNodes((nds) =>
         nds.map((n): BoardNode => {
-          if (n.type !== "clusterNode") return n;
-          const c = n as ClusterFlowNode;
-          if (c.id === prev) return { ...c, data: { ...c.data, isDropTarget: false } };
-          if (c.id === foundId) return { ...c, data: { ...c.data, isDropTarget: true } };
-          return c;
+          if (n.id === prev || n.id === foundId) {
+            if (n.type === "clusterNode") {
+              const c = n as ClusterFlowNode;
+              return { ...c, data: { ...c.data, isDropTarget: n.id === foundId } };
+            }
+            if (n.type === "noteCard") {
+              const note = n as NoteFlowNode;
+              return { ...note, data: { ...note.data, isDropTarget: n.id === foundId } };
+            }
+          }
+          return n;
         }),
       );
     }
@@ -205,44 +211,70 @@ export function Board() {
 
   const onNodeDragStop = useCallback((_: React.MouseEvent, draggedNode: Node) => {
     const targetId = prevDropTargetRef.current;
+    prevDropTargetRef.current = null;
 
     // Always clear the drop-target highlight.
     if (targetId) {
       setNodes((nds) =>
-        nds.map((n): BoardNode =>
-          n.id === targetId && n.type === "clusterNode"
-            ? { ...(n as ClusterFlowNode), data: { ...(n as ClusterFlowNode).data, isDropTarget: false } }
-            : n,
-        ),
+        nds.map((n): BoardNode => {
+          if (n.id !== targetId) return n;
+          if (n.type === "clusterNode") return { ...(n as ClusterFlowNode), data: { ...(n as ClusterFlowNode).data, isDropTarget: false } };
+          if (n.type === "noteCard") return { ...(n as NoteFlowNode), data: { ...(n as NoteFlowNode).data, isDropTarget: false } };
+          return n;
+        }),
       );
-      prevDropTargetRef.current = null;
     }
 
     if (draggedNode.type !== "noteCard" || !targetId) return;
 
     const noteNode = draggedNode as NoteFlowNode;
-    const addedNoteId = crypto.randomUUID();
-    const newNote: ClusterNoteItem = {
-      id: addedNoteId,
-      body: noteNode.data.body,
-      colorKey: noteNode.data.colorKey,
-      formatting: noteNode.data.formatting,
-    };
-
-    // Record start position for undo restoration.
     const startPosition = dragStartPositionRef.current ?? noteNode.position;
-    setPinUndo({ node: { ...noteNode, position: startPosition }, clusterId: targetId, addedNoteId });
     dragStartPositionRef.current = null;
 
-    setNodes((nds) =>
-      nds
-        .filter((n) => n.id !== draggedNode.id)
-        .map((n) =>
-          n.id === targetId && n.type === "clusterNode"
-            ? { ...n, data: { ...n.data, notes: [...(n as ClusterFlowNode).data.notes, newNote] } }
-            : n,
-        ),
-    );
+    const targetNode = nodesRef.current.find((n) => n.id === targetId);
+    if (!targetNode) return;
+
+    if (targetNode.type === "clusterNode") {
+      // ── Note → Cluster: append note to cluster ─────────────────────────────
+      const addedNoteId = crypto.randomUUID();
+      const newNote: ClusterNoteItem = {
+        id: addedNoteId,
+        body: noteNode.data.body,
+        colorKey: noteNode.data.colorKey,
+        formatting: noteNode.data.formatting,
+      };
+      setPinUndo({ kind: "noteToCluster", draggedNode: { ...noteNode, position: startPosition }, clusterId: targetId, addedNoteId });
+      setNodes((nds) =>
+        nds
+          .filter((n) => n.id !== draggedNode.id)
+          .map((n) =>
+            n.id === targetId && n.type === "clusterNode"
+              ? { ...n, data: { ...n.data, notes: [...(n as ClusterFlowNode).data.notes, newNote] } }
+              : n,
+          ),
+      );
+    } else if (targetNode.type === "noteCard") {
+      // ── Note → Note: create new cluster at target's position ───────────────
+      const target = targetNode as NoteFlowNode;
+      const newClusterId = crypto.randomUUID();
+      const newCluster: ClusterFlowNode = {
+        id: newClusterId,
+        type: "clusterNode",
+        position: { ...target.position },
+        data: {
+          notes: [
+            { id: crypto.randomUUID(), body: target.data.body, colorKey: target.data.colorKey, formatting: target.data.formatting },
+            { id: crypto.randomUUID(), body: noteNode.data.body, colorKey: noteNode.data.colorKey, formatting: noteNode.data.formatting },
+          ],
+          colorKey: target.data.colorKey ?? DEFAULT_NOTE_COLOR,
+        },
+      };
+      setPinUndo({ kind: "noteToNote", draggedNode: { ...noteNode, position: startPosition }, targetNode: { ...target }, newClusterId });
+      setNodes((nds) => [
+        ...nds.filter((n) => n.id !== draggedNode.id && n.id !== targetId),
+        newCluster,
+      ]);
+    }
   }, [setNodes]);
 
   // Single-level undo for drag-to-pin (Cmd+Z / Ctrl+Z).
@@ -251,21 +283,24 @@ export function Board() {
       if (!pinUndo) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
         e.preventDefault();
-        const { node, clusterId, addedNoteId } = pinUndo;
-        setNodes((nds) => [
-          ...nds.map((n) =>
-            n.id === clusterId && n.type === "clusterNode"
-              ? {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    notes: (n as ClusterFlowNode).data.notes.filter((note) => note.id !== addedNoteId),
-                  },
-                }
-              : n,
-          ),
-          node,
-        ]);
+        if (pinUndo.kind === "noteToCluster") {
+          const { draggedNode, clusterId, addedNoteId } = pinUndo;
+          setNodes((nds) => [
+            ...nds.map((n) =>
+              n.id === clusterId && n.type === "clusterNode"
+                ? { ...n, data: { ...n.data, notes: (n as ClusterFlowNode).data.notes.filter((note) => note.id !== addedNoteId) } }
+                : n,
+            ),
+            draggedNode,
+          ]);
+        } else {
+          const { draggedNode, targetNode, newClusterId } = pinUndo;
+          setNodes((nds) => [
+            ...nds.filter((n) => n.id !== newClusterId),
+            targetNode,
+            draggedNode,
+          ]);
+        }
         setPinUndo(null);
       }
     };
