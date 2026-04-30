@@ -86,16 +86,44 @@ export function Board() {
   const handleDeleteNote = useCallback(
     (noteId: string) => {
       if (!expandedCluster) return;
-      updateClusterNodes(expandedCluster.id, (n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          notes: n.data.notes.filter((note) => note.id !== noteId),
-        },
-      }));
+      const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
+      if (remaining.length === 0) {
+        // Auto-delete empty cluster.
+        setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
+      } else {
+        updateClusterNodes(expandedCluster.id, (n) => ({
+          ...n,
+          data: { ...n.data, notes: remaining },
+        }));
+      }
     },
-    [expandedCluster, updateClusterNodes],
+    [expandedCluster, setNodes, updateClusterNodes],
   );
+
+  const handleDeleteCluster = useCallback(() => {
+    if (!expandedCluster) return;
+    setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
+  }, [expandedCluster, setNodes]);
+
+  const handleUncluster = useCallback(() => {
+    if (!expandedCluster) return;
+    const { position, data } = expandedCluster;
+    const looseNotes: NoteFlowNode[] = data.notes.map((note, i) => ({
+      id: crypto.randomUUID(),
+      type: "noteCard" as const,
+      // Spread notes in a gentle diagonal so they don't stack exactly.
+      position: { x: position.x + i * 30, y: position.y + i * 30 },
+      data: {
+        body: note.body,
+        colorKey: note.colorKey,
+        formatting: note.formatting,
+      },
+    }));
+    setNodes((nds) => [
+      ...nds.filter((n) => n.id !== expandedCluster.id),
+      ...looseNotes,
+    ]);
+  }, [expandedCluster, setNodes]);
 
   const handleAddNote = useCallback(() => {
     if (!expandedCluster) return;
@@ -111,7 +139,7 @@ export function Board() {
   }, [expandedCluster, updateClusterNodes]);
 
   return (
-    <div className="h-dvh w-full bg-white">
+    <div className="h-dvh w-full bg-white dark:bg-neutral-900">
       <ReactFlow
         className="h-full w-full touch-manipulation"
         nodes={nodes}
@@ -141,6 +169,8 @@ export function Board() {
           onDeleteNote={handleDeleteNote}
           onAddNote={handleAddNote}
           onClose={handleClosePanel}
+          onDeleteCluster={handleDeleteCluster}
+          onUncluster={handleUncluster}
         />
       )}
     </div>

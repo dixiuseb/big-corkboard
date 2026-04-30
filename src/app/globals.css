@@ -24,3 +24,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── React Flow handle visibility ─────────────────────────────────────────── */
+/* Handles are hidden by default. The board exposes a connection-mode toggle
+   in the toolbar; when active, Board adds data-connecting="true" to the
+   canvas wrapper and this rule makes all handles visible. This approach works
+   on both desktop and touch — no hover required. */
+.react-flow__handle {
+  opacity: 0 !important;
+  transition: opacity 0.15s ease !important;
+}
+
+[data-connecting="true"] .react-flow__handle {
+  opacity: 1 !important;
+}
+

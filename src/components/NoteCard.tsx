@@ -200,11 +200,15 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
         </div>
       </NodeToolbar>
 
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!h-2.5 !w-2.5 !border border-[var(--foreground)]/25 !bg-[var(--background)]"
-      />
+      {/* 8 handles: 4 sides + 4 corners */}
+      <Handle id="t"  type="source" position={Position.Top}                                              style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="b"  type="source" position={Position.Bottom}                                           style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="l"  type="source" position={Position.Left}                                             style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="r"  type="source" position={Position.Right}                                            style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
 
       <div
         onDoubleClick={!editing ? enterEditMode : undefined}
@@ -224,23 +228,17 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
             }}
             onWheel={(e) => e.stopPropagation()}
             placeholder="Note…"
-            className={`nodrag nopan min-h-[120px] w-full cursor-text resize-y rounded-lg bg-transparent px-3 py-2 outline-none placeholder:text-black/35 dark:placeholder:text-white/35 ${fmtClasses}`}
+            className={`nodrag nopan min-h-[120px] w-full cursor-text resize-y rounded-lg bg-transparent px-3 py-2 outline-none placeholder:text-stone-400 ${fmtClasses}`}
             spellCheck
           />
         ) : (
           <p
-            className={`min-h-[120px] w-full select-none whitespace-pre-wrap break-words px-3 py-2 opacity-100 empty:after:text-black/30 empty:after:content-['Note…'] dark:empty:after:text-white/30 ${fmtClasses}`}
+            className={`min-h-[120px] w-full select-none whitespace-pre-wrap break-words px-3 py-2 opacity-100 empty:after:text-stone-400 empty:after:content-['Note…'] ${fmtClasses}`}
           >
             {data.body}
           </p>
         )}
       </div>
-
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!h-2.5 !w-2.5 !border border-[var(--foreground)]/25 !bg-[var(--background)]"
-      />
     </>
   );
 }

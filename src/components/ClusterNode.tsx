@@ -46,11 +46,15 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
   return (
     <>
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!h-2.5 !w-2.5 !border border-[var(--foreground)]/25 !bg-[var(--background)]"
-      />
+      {/* 8 handles: 4 sides + 4 corners */}
+      <Handle id="t"  type="source" position={Position.Top}                                              style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="b"  type="source" position={Position.Bottom}                                           style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="l"  type="source" position={Position.Left}                                             style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="r"  type="source" position={Position.Right}                                            style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
 
       <div
         className="relative"
@@ -106,11 +110,6 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
         </div>
       </div>
 
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!h-2.5 !w-2.5 !border border-[var(--foreground)]/25 !bg-[var(--background)]"
-      />
     </>
   );
 }
