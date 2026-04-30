@@ -140,7 +140,12 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 
 - **Optional and low-attention** — connections are available but not the primary focus.
 - **Source and target** can be notes or clusters (any combination).
-- **Handles** are hidden by default; appear subtly on node hover using a darker shade of the node's color.
+- **Connection mode** — a dedicated toggle button in the top toolbar switches the board into connection mode. While active:
+  - All node handles become visible (styled as small dots in each note's own color, on all 4 sides and 4 corners).
+  - The user draws an edge by dragging from one handle to another.
+  - The toolbar button shows a clear "active" state so it's obvious the mode is on.
+  - Tapping/clicking the button again (or pressing `Escape`) exits connection mode and hides handles.
+  - This approach works identically on touch and desktop — no hover required.
 - **Direction**: new edges start with `direction: 'none'` (no arrow). A **right-click context menu** on any edge toggles: none → forward → reverse → both → none.
 - **Labels**: click an edge to edit its label inline.
 - **Deleting an edge**: `Backspace` or `Delete` when selected, or via the right-click context menu.
