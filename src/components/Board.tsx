@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -27,10 +27,6 @@ import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
-type PinUndoAction =
-  | { kind: "noteToCluster"; draggedNode: NoteFlowNode; clusterId: string; addedNoteId: string }
-  | { kind: "noteToNote"; draggedNode: NoteFlowNode; targetNode: NoteFlowNode; newClusterId: string };
-
 const initialNodes: BoardNode[] = [];
 const initialEdges: Edge[] = [];
 
@@ -45,7 +41,6 @@ export function Board() {
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
   const prevDropTargetRef = useRef<string | null>(null);
   const dragStartPositionRef = useRef<XYPosition | null>(null);
-  const [pinUndo, setPinUndo] = useState<PinUndoAction | null>(null);
 
   // nodeTypes must be stable across renders to avoid React Flow remounting nodes.
   const nodeTypes = useMemo(() => ({ noteCard: NoteCard, clusterNode: ClusterNode }), []);
@@ -243,7 +238,6 @@ export function Board() {
         colorKey: noteNode.data.colorKey,
         formatting: noteNode.data.formatting,
       };
-      setPinUndo({ kind: "noteToCluster", draggedNode: { ...noteNode, position: startPosition }, clusterId: targetId, addedNoteId });
       setNodes((nds) =>
         nds
           .filter((n) => n.id !== draggedNode.id)
@@ -269,44 +263,12 @@ export function Board() {
           colorKey: target.data.colorKey ?? DEFAULT_NOTE_COLOR,
         },
       };
-      setPinUndo({ kind: "noteToNote", draggedNode: { ...noteNode, position: startPosition }, targetNode: { ...target }, newClusterId });
       setNodes((nds) => [
         ...nds.filter((n) => n.id !== draggedNode.id && n.id !== targetId),
         newCluster,
       ]);
     }
   }, [setNodes]);
-
-  // Single-level undo for drag-to-pin (Cmd+Z / Ctrl+Z).
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!pinUndo) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
-        e.preventDefault();
-        if (pinUndo.kind === "noteToCluster") {
-          const { draggedNode, clusterId, addedNoteId } = pinUndo;
-          setNodes((nds) => [
-            ...nds.map((n) =>
-              n.id === clusterId && n.type === "clusterNode"
-                ? { ...n, data: { ...n.data, notes: (n as ClusterFlowNode).data.notes.filter((note) => note.id !== addedNoteId) } }
-                : n,
-            ),
-            draggedNode,
-          ]);
-        } else {
-          const { draggedNode, targetNode, newClusterId } = pinUndo;
-          setNodes((nds) => [
-            ...nds.filter((n) => n.id !== newClusterId),
-            targetNode,
-            draggedNode,
-          ]);
-        }
-        setPinUndo(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [pinUndo, setNodes]);
 
   return (
     <div className="h-dvh w-full bg-white dark:bg-neutral-900">

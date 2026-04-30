@@ -172,7 +172,7 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 - **Drag a loose note over a cluster** → cluster highlights → release → note appended to the **end** of the cluster's notes list and removed from the canvas.
 - **Drag a loose note over another standalone note** → target note highlights → release → a new cluster is created at the target note's position containing both notes (target note first, dragged note appended). Both source notes are removed from the canvas.
 - The dragged note's center must be inside the target's bounds to trigger the drop (not just overlapping the edge).
-- **Undo** (`Cmd+Z` / `Ctrl+Z`): single level — restores the previous state (note back to canvas / cluster dissolved back to two standalone notes).
+- **Undo** is handled by the full undo/redo history (chunk 6), not a special-case handler.
 
 ### Persistence
 
@@ -197,11 +197,12 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 1. **Canvas + note nodes** ✓ — full-screen canvas; notecards with color, drag, double-click-to-edit.
 2. **Selection popup** ✓ — `NodeToolbar` with color, font size, B/I/U, create-cluster, delete.
 3. **Cluster nodes** ✓ — stacked visual; expand button; side panel with editable notes; cluster-level delete and un-cluster.
-4. **Drag-to-pin** — center-of-note detection; cluster/note highlights; note-on-cluster appends; note-on-note creates new cluster; single-level undo.
-5. **Connections** — labeled edges; handles on hover only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
-6. **Persistence** — debounced auto-save; separate board-list and canvas-state keys; first-load default board; clear board dialog.
-7. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
-8. **Drag-out from cluster panel** — drag a note from the side panel back onto the canvas. *(Deferred — most complex interaction.)*
+4. **Drag-to-pin** ✓ — center-of-note detection; cluster/note highlights; note-on-cluster appends; note-on-note creates new cluster.
+5. **Connections** — labeled edges; handles visible in connection mode only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
+6. **Undo / redo** — full history stack (capped ~50); `Cmd+Z` / `Cmd+Shift+Z`; snapshots on committed actions (drag stop, create, delete, pin, edge ops, text blur, format change); no per-keystroke snapshots.
+7. **Persistence** — debounced auto-save; separate board-list and canvas-state keys; first-load default board; clear board dialog.
+8. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
+9. **Drag-out from cluster panel** — drag a note from the side panel back onto the canvas. *(Deferred — most complex interaction.)*
 
 Post-v1 backlog (in rough priority order):
 - **Color label legend** (v2) — legend strip + "Assign category" editor at the bottom of the canvas.
