@@ -17,6 +17,7 @@ export type ClusterNodeData = {
   notes: ClusterNoteItem[];
   colorKey?: NoteColorKey;
   expanded?: boolean;
+  isDropTarget?: boolean;
 };
 
 export type ClusterFlowNode = Node<ClusterNodeData, "clusterNode">;
@@ -31,6 +32,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { updateNodeData } = useReactFlow();
   const colorKey = data.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
+  const isDropTarget = !!data.isDropTarget;
   const notes = data.notes ?? [];
   // Cap the visible stack at 3 layers.
   const stackLayers = Math.min(notes.length, 3);
@@ -77,7 +79,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
         {/* Front card */}
         <div
-          className={`relative rounded-lg border shadow-md ring-2 ring-offset-1 transition-shadow ${palette.cardClass} ${selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"}`}
+          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 transition-all ${palette.cardClass} ${isDropTarget ? `${palette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"}`}
           style={{ zIndex: stackLayers }}
         >
           {/* Header row: note count + expand button */}
