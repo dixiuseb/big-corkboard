@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   ConnectionMode,
+  ConnectionLineType,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -21,18 +22,23 @@ import ClusterNode, {
   type ClusterFlowNode,
   type ClusterNoteItem,
 } from "@/components/ClusterNode";
+import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/BoardEdge";
 import { ClusterPanel } from "@/components/ClusterPanel";
 import { Toolbar } from "@/components/Toolbar";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
+type ContextMenu = { edgeId: string; x: number; y: number };
+
+const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
+
 const initialNodes: BoardNode[] = [];
-const initialEdges: Edge[] = [];
+const initialEdges: BoardEdgeType[] = [];
 
 export function Board() {
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<BoardEdgeType>(initialEdges);
 
   // Always-fresh ref so drag callbacks don't capture stale node lists.
   const nodesRef = useRef(nodes);
@@ -42,13 +48,68 @@ export function Board() {
   const prevDropTargetRef = useRef<string | null>(null);
   const dragStartPositionRef = useRef<XYPosition | null>(null);
 
+  // ── Connection mode ────────────────────────────────────────────────────────
+  const [connecting, setConnecting] = useState(false);
+  const toggleConnecting = useCallback(() => setConnecting((v) => !v), []);
+
   // nodeTypes must be stable across renders to avoid React Flow remounting nodes.
   const nodeTypes = useMemo(() => ({ noteCard: NoteCard, clusterNode: ClusterNode }), []);
+  const edgeTypes = useMemo(() => ({ boardEdge: BoardEdge }), []);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    (params: Connection) =>
+      setEdges((eds) =>
+        addEdge(
+          { ...params, type: "boardEdge", data: { direction: "none" } },
+          eds,
+        ) as BoardEdgeType[],
+      ),
     [setEdges],
   );
+
+  // ── Context menu (edge right-click) ───────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+
+  const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: Edge) => {
+    e.preventDefault();
+    setContextMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  const setEdgeDirection = useCallback((edgeId: string, direction: EdgeDirection) => {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === edgeId
+          ? { ...e, data: { ...(e.data as BoardEdgeType["data"]), direction } }
+          : e,
+      ) as BoardEdgeType[],
+    );
+    closeContextMenu();
+  }, [setEdges, closeContextMenu]);
+
+  const deleteEdge = useCallback((edgeId: string) => {
+    setEdges((eds) => eds.filter((e) => e.id !== edgeId) as BoardEdgeType[]);
+    closeContextMenu();
+  }, [setEdges, closeContextMenu]);
+
+  // ── Keyboard: Escape exits connection mode; Backspace deletes selected edges
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setConnecting(false);
+        setContextMenu(null);
+        return;
+      }
+      if (e.key === "Backspace") {
+        const active = document.activeElement;
+        if (active?.tagName === "INPUT" || active?.tagName === "TEXTAREA") return;
+        setEdges((eds) => eds.filter((edge) => !edge.selected) as BoardEdgeType[]);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setEdges]);
 
   // ── Cluster panel state ────────────────────────────────────────────────────
   const expandedCluster = useMemo(
@@ -83,7 +144,6 @@ export function Board() {
           notes: n.data.notes.map((note) =>
             note.id === noteId ? { ...note, ...update } : note,
           ),
-          // Keep cluster's primary color in sync with first note.
           colorKey: n.data.notes[0]?.id === noteId
             ? (update.colorKey ?? n.data.colorKey)
             : n.data.colorKey,
@@ -98,7 +158,6 @@ export function Board() {
       if (!expandedCluster) return;
       const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
       if (remaining.length === 0) {
-        // Auto-delete empty cluster.
         setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
       } else {
         updateClusterNodes(expandedCluster.id, (n) => ({
@@ -121,7 +180,6 @@ export function Board() {
     const looseNotes: NoteFlowNode[] = data.notes.map((note, i) => ({
       id: crypto.randomUUID(),
       type: "noteCard" as const,
-      // Spread notes in a gentle diagonal so they don't stack exactly.
       position: { x: position.x + i * 30, y: position.y + i * 30 },
       data: {
         body: note.body,
@@ -167,7 +225,6 @@ export function Board() {
 
     let foundId: string | null = null;
     for (const n of nodesRef.current) {
-      // Skip the node being dragged.
       if (n.id === draggedNode.id) continue;
       if (n.type !== "clusterNode" && n.type !== "noteCard") continue;
       const nw = n.measured?.width ?? 240;
@@ -208,7 +265,6 @@ export function Board() {
     const targetId = prevDropTargetRef.current;
     prevDropTargetRef.current = null;
 
-    // Always clear the drop-target highlight.
     if (targetId) {
       setNodes((nds) =>
         nds.map((n): BoardNode => {
@@ -230,7 +286,6 @@ export function Board() {
     if (!targetNode) return;
 
     if (targetNode.type === "clusterNode") {
-      // ── Note → Cluster: append note to cluster ─────────────────────────────
       const addedNoteId = crypto.randomUUID();
       const newNote: ClusterNoteItem = {
         id: addedNoteId,
@@ -238,6 +293,7 @@ export function Board() {
         colorKey: noteNode.data.colorKey,
         formatting: noteNode.data.formatting,
       };
+      void startPosition; // captured for future undo
       setNodes((nds) =>
         nds
           .filter((n) => n.id !== draggedNode.id)
@@ -248,11 +304,9 @@ export function Board() {
           ),
       );
     } else if (targetNode.type === "noteCard") {
-      // ── Note → Note: create new cluster at target's position ───────────────
       const target = targetNode as NoteFlowNode;
-      const newClusterId = crypto.randomUUID();
       const newCluster: ClusterFlowNode = {
-        id: newClusterId,
+        id: crypto.randomUUID(),
         type: "clusterNode",
         position: { ...target.position },
         data: {
@@ -270,16 +324,35 @@ export function Board() {
     }
   }, [setNodes]);
 
+  // ── Context menu direction labels ─────────────────────────────────────────
+  const DIRECTION_LABELS: Record<EdgeDirection, string> = {
+    none: "— No arrow",
+    forward: "→ Forward",
+    reverse: "← Reverse",
+    both: "↔ Both",
+  };
+
+  const contextEdge = contextMenu
+    ? (edges.find((e) => e.id === contextMenu.edgeId) as BoardEdgeType | undefined)
+    : null;
+
   return (
-    <div className="h-dvh w-full bg-white dark:bg-neutral-900">
+    <div
+      className="h-dvh w-full bg-white dark:bg-neutral-900"
+      data-connecting={connecting ? "true" : undefined}
+      onClick={contextMenu ? closeContextMenu : undefined}
+      onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
+    >
       <ReactFlow
         className="h-full w-full touch-manipulation"
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onEdgeContextMenu={onEdgeContextMenu}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
@@ -288,14 +361,16 @@ export function Board() {
         minZoom={0.15}
         maxZoom={2}
         connectionMode={ConnectionMode.Loose}
+        connectionLineType={ConnectionLineType.Straight}
         deleteKeyCode="Delete"
+        defaultEdgeOptions={{ type: "boardEdge" }}
       >
-        <Toolbar />
+        <Toolbar connecting={connecting} onToggleConnecting={toggleConnecting} />
         <Background gap={18} size={1} className="opacity-40" />
         <Controls />
       </ReactFlow>
 
-      {/* Cluster side panel — rendered outside ReactFlow so it isn't affected by canvas zoom */}
+      {/* Cluster side panel */}
       {expandedCluster && (
         <ClusterPanel
           clusterId={expandedCluster.id}
@@ -307,6 +382,47 @@ export function Board() {
           onDeleteCluster={handleDeleteCluster}
           onUncluster={handleUncluster}
         />
+      )}
+
+      {/* Edge right-click context menu */}
+      {contextMenu && contextEdge && (
+        <div
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-black/10 bg-white shadow-xl dark:border-white/10 dark:bg-neutral-800"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">
+            Direction
+          </div>
+          {DIRECTION_CYCLE.map((dir) => {
+            const active = contextEdge.data?.direction === dir;
+            return (
+              <button
+                key={dir}
+                type="button"
+                onClick={() => setEdgeDirection(contextMenu.edgeId, dir)}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/8 ${
+                  active
+                    ? "font-medium text-indigo-600 dark:text-indigo-400"
+                    : "text-black/70 dark:text-white/70"
+                }`}
+              >
+                {active
+                  ? <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                  : <span className="h-1.5 w-1.5" />}
+                {DIRECTION_LABELS[dir]}
+              </button>
+            );
+          })}
+          <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
+          <button
+            type="button"
+            onClick={() => deleteEdge(contextMenu.edgeId)}
+            className="flex w-full items-center px-3 py-2 text-sm text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+          >
+            <span className="ml-3.5">Delete edge</span>
+          </button>
+        </div>
       )}
     </div>
   );

@@ -39,3 +39,13 @@ body {
   opacity: 1 !important;
 }
 
+/* Render edges on top of node cards so connections look like pinned strings */
+.react-flow__edges {
+  z-index: 1000;
+}
+
+/* Edge labels must sit above the edge SVG so they're clickable */
+.react-flow__edgelabels {
+  z-index: 1001;
+}
+
