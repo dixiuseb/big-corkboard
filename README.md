@@ -198,7 +198,7 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 2. **Selection popup** ✓ — `NodeToolbar` with color, font size, B/I/U, create-cluster, delete.
 3. **Cluster nodes** ✓ — stacked visual; expand button; side panel with editable notes; cluster-level delete and un-cluster.
 4. **Drag-to-pin** ✓ — center-of-note detection; cluster/note highlights; note-on-cluster appends; note-on-note creates new cluster.
-5. **Connections** — labeled edges; handles visible in connection mode only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
+5. **Connections** ✓ — labeled edges; handles visible in connection mode only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
 6. **Undo / redo** — full history stack (capped ~50); `Cmd+Z` / `Cmd+Shift+Z`; snapshots on committed actions (drag stop, create, delete, pin, edge ops, text blur, format change); no per-keystroke snapshots.
 7. **Persistence** — debounced auto-save; separate board-list and canvas-state keys; first-load default board; clear board dialog.
 8. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
