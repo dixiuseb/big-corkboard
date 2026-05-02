@@ -9,10 +9,12 @@ import {
   ConnectionLineType,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   addEdge,
   type Connection,
   type Edge,
   type Node,
+  type Viewport,
   type XYPosition,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -27,6 +29,14 @@ import { ClusterPanel } from "@/components/ClusterPanel";
 import { Toolbar } from "@/components/Toolbar";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 import { UndoContext } from "@/lib/UndoContext";
+import {
+  loadBoardsMeta,
+  saveBoardsMeta,
+  loadBoardState,
+  saveBoardState,
+  type BoardMeta,
+  type PersistedBoardState,
+} from "@/lib/persistence";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -34,15 +44,91 @@ type ContextMenu = { edgeId: string; x: number; y: number };
 
 const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
 
-const initialNodes: BoardNode[] = [];
-const initialEdges: BoardEdgeType[] = [];
-
 type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[] };
 const MAX_HISTORY = 50;
+const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+
+// Strip React Flow's internal runtime properties before writing to localStorage.
+// Also clear UI-only flags (isDropTarget, expanded) that shouldn't survive a reload.
+function serializeNodes(nodes: BoardNode[]): object[] {
+  return nodes.map((n) => {
+    const base = { id: n.id, type: n.type, position: n.position };
+    if (n.type === "noteCard") {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { isDropTarget: _dt, ...cleanData } = n.data;
+      return { ...base, data: cleanData };
+    }
+    // clusterNode
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { isDropTarget: _dt, expanded: _ex, ...cleanData } = (n as ClusterFlowNode).data;
+    return { ...base, data: cleanData };
+  });
+}
+
+function serializeEdges(edges: BoardEdgeType[]): object[] {
+  return edges.map(({ id, source, target, sourceHandle, targetHandle, type, data }) => ({
+    id, source, target, sourceHandle, targetHandle, type, data,
+  }));
+}
+
+// ── Viewport resetter (must live inside the ReactFlow provider) ───────────────
+function ViewportResetter({ signal }: { signal: number }) {
+  const { setViewport } = useReactFlow();
+  useEffect(() => {
+    if (signal > 0) setViewport(DEFAULT_VIEWPORT, { duration: 0 });
+  }, [signal, setViewport]);
+  return null;
+}
 
 export function Board() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<BoardEdgeType>(initialEdges);
+  // ── Persistence: load saved board on first render ─────────────────────────
+  // page.tsx uses ssr:false so localStorage is always available here.
+  const [boardId] = useState<string>(() => {
+    const meta = loadBoardsMeta();
+    if (meta.length > 0) return meta[0].id;
+    const newId = crypto.randomUUID();
+    saveBoardsMeta([{ id: newId, title: "Board 1" } satisfies BoardMeta]);
+    return newId;
+  });
+
+  const [savedState] = useState<PersistedBoardState | null>(() => loadBoardState(boardId));
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(
+    (savedState?.nodes ?? []) as BoardNode[],
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState<BoardEdgeType>(
+    (savedState?.edges ?? []) as BoardEdgeType[],
+  );
+
+  const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
+
+  // Tracks the latest viewport so it's included in auto-saves.
+  const viewportRef = useRef<Viewport>(defaultViewport);
+
+  // ── Debounced auto-save (nodes + edges + current viewport) ────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveBoardState(boardId, {
+        nodes: serializeNodes(nodes),
+        edges: serializeEdges(edges),
+        viewport: viewportRef.current,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [nodes, edges, boardId]);
+
+  const onMoveEnd = useCallback((_: unknown, viewport: Viewport) => {
+    viewportRef.current = viewport;
+    // Save immediately on viewport change (panning / zooming without editing).
+    saveBoardState(boardId, {
+      nodes: serializeNodes(nodesRef.current),
+      edges: serializeEdges(edgesRef.current),
+      viewport,
+    });
+  }, [boardId]);
+
+  // Signal for ViewportResetter (incremented on "Clear board").
+  const [resetViewportSignal, setResetViewportSignal] = useState(0);
 
   // Always-fresh refs so drag/keyboard callbacks never capture stale state.
   const nodesRef = useRef(nodes);
@@ -429,6 +515,20 @@ export function Board() {
     ? (edges.find((e) => e.id === contextMenu.edgeId) as BoardEdgeType | undefined)
     : null;
 
+  // ── Clear board ───────────────────────────────────────────────────────────
+  const handleClearBoard = useCallback(() => {
+    if (!window.confirm("Clear this board? All notes and connections will be removed.")) return;
+    setNodes([]);
+    setEdges([]);
+    undoStack.current = [];
+    redoStack.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setResetViewportSignal((s) => s + 1);
+    viewportRef.current = DEFAULT_VIEWPORT;
+    saveBoardState(boardId, { nodes: [], edges: [], viewport: DEFAULT_VIEWPORT });
+  }, [boardId, setNodes, setEdges, setCanUndo, setCanRedo]);
+
   const undoContextValue = useMemo(() => ({ pushSnapshot }), [pushSnapshot]);
 
   return (
@@ -452,8 +552,8 @@ export function Board() {
           onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
-          fitView
-          fitViewOptions={{ padding: 0.35 }}
+          onMoveEnd={onMoveEnd}
+          defaultViewport={defaultViewport}
           minZoom={0.15}
           maxZoom={2}
           connectionMode={ConnectionMode.Loose}
@@ -468,9 +568,11 @@ export function Board() {
             onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
+            onClearBoard={handleClearBoard}
           />
           <Background gap={18} size={1} className="opacity-40" />
           <Controls />
+          <ViewportResetter signal={resetViewportSignal} />
         </ReactFlow>
 
         {/* Cluster side panel */}

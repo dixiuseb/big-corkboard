@@ -12,9 +12,10 @@ type ToolbarProps = {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  onClearBoard: () => void;
 };
 
-export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUndo, canRedo }: ToolbarProps) {
+export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUndo, canRedo, onClearBoard }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
 
@@ -118,6 +119,17 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
             <line x1="8.5" y1="8.5" x2="15.5" y2="15.5" />
           </svg>
           Connect
+        </button>
+
+        <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        <button
+          type="button"
+          onClick={onClearBoard}
+          title="Clear all notes and connections from this board"
+          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-500 transition-colors hover:border-red-300 hover:text-red-600 dark:border-white/15 dark:text-neutral-500 dark:hover:border-red-500/50 dark:hover:text-red-400"
+        >
+          Clear
         </button>
       </div>
     </Panel>
