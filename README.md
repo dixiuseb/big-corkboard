@@ -199,7 +199,7 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 3. **Cluster nodes** ✓ — stacked visual; expand button; side panel with editable notes; cluster-level delete and un-cluster.
 4. **Drag-to-pin** ✓ — center-of-note detection; cluster/note highlights; note-on-cluster appends; note-on-note creates new cluster.
 5. **Connections** ✓ — labeled edges; handles visible in connection mode only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
-6. **Undo / redo** — full history stack (capped ~50); `Cmd+Z` / `Cmd+Shift+Z`; snapshots on committed actions (drag stop, create, delete, pin, edge ops, text blur, format change); no per-keystroke snapshots.
+6. **Undo / redo** ✓ — full history stack (capped ~50); `Cmd+Z` / `Cmd+Shift+Z` keyboard shortcuts; undo/redo buttons in the top toolbar (disabled when unavailable); snapshots on committed actions (drag stop, create, delete, pin, edge ops, text blur, format change); no per-keystroke snapshots.
 7. **Persistence** — debounced auto-save; separate board-list and canvas-state keys; first-load default board; clear board dialog.
 8. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
 9. **Drag-out from cluster panel** — drag a note from the side panel back onto the canvas. *(Deferred — most complex interaction.)*
