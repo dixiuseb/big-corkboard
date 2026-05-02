@@ -8,9 +8,13 @@ import { useUndoContext } from "@/lib/UndoContext";
 type ToolbarProps = {
   connecting: boolean;
   onToggleConnecting: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 };
 
-export function Toolbar({ connecting, onToggleConnecting }: ToolbarProps) {
+export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUndo, canRedo }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
 
@@ -49,6 +53,34 @@ export function Toolbar({ connecting, onToggleConnecting }: ToolbarProps) {
   return (
     <Panel position="top-center" className="m-2">
       <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/90 px-3 py-2 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-neutral-800/90">
+        {/* Undo / Redo */}
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (⌘Z)"
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 14 4 9l5-5" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (⌘⇧Z)"
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 14l5-5-5-5" />
+            <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+          </svg>
+        </button>
+
+        <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
+
         <button
           type="button"
           onClick={addNote}

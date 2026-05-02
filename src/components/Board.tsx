@@ -59,14 +59,19 @@ export function Board() {
   //   redo()          — pops the redo stack; pushes current state to undo stack.
   //
   // Stacks are refs (not state) so pushes don't trigger re-renders.
+  // canUndo/canRedo are state so the toolbar buttons re-render when availability changes.
   const undoStack = useRef<Snapshot[]>([]);
   const redoStack = useRef<Snapshot[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const pushSnapshot = useCallback(() => {
     undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     // Any new action clears the redo branch.
     redoStack.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
   }, []);
 
   const undo = useCallback(() => {
@@ -76,6 +81,8 @@ export function Board() {
     const snap = undoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setCanUndo(undoStack.current.length > 0);
+    setCanRedo(true);
   }, [setNodes, setEdges]);
 
   const redo = useCallback(() => {
@@ -85,6 +92,8 @@ export function Board() {
     const snap = redoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setCanUndo(true);
+    setCanRedo(redoStack.current.length > 0);
   }, [setNodes, setEdges]);
 
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
@@ -452,7 +461,14 @@ export function Board() {
           deleteKeyCode={null}
           defaultEdgeOptions={{ type: "boardEdge" }}
         >
-          <Toolbar connecting={connecting} onToggleConnecting={toggleConnecting} />
+          <Toolbar
+            connecting={connecting}
+            onToggleConnecting={toggleConnecting}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+          />
           <Background gap={18} size={1} className="opacity-40" />
           <Controls />
         </ReactFlow>
