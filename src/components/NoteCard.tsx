@@ -14,6 +14,7 @@ import {
   NOTE_COLOR_META,
   DEFAULT_NOTE_COLOR,
 } from "@/lib/noteColors";
+import { useUndoContext } from "@/lib/UndoContext";
 
 export type NoteFontSize = "sm" | "md" | "lg" | "xl";
 
@@ -49,6 +50,7 @@ const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
 
 function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
   const { updateNodeData, deleteElements, addNodes, getNode } = useReactFlow();
+  const { pushSnapshot } = useUndoContext();
   const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -60,19 +62,30 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
 
   const updateBody = (body: string) => updateNodeData(id, { body });
 
-  const toggleFormat = (key: keyof Omit<NoteFormatting, "fontSize">) =>
+  const toggleFormat = (key: keyof Omit<NoteFormatting, "fontSize">) => {
+    pushSnapshot();
     updateNodeData(id, { formatting: { ...fmt, [key]: !fmt[key] } });
+  };
 
-  const setFontSize = (size: NoteFontSize) =>
+  const setFontSize = (size: NoteFontSize) => {
+    pushSnapshot();
     updateNodeData(id, { formatting: { ...fmt, fontSize: size } });
+  };
 
-  const setColor = (key: NoteColorKey) => updateNodeData(id, { colorKey: key });
+  const setColor = (key: NoteColorKey) => {
+    pushSnapshot();
+    updateNodeData(id, { colorKey: key });
+  };
 
-  const deleteNote = () => deleteElements({ nodes: [{ id }] });
+  const deleteNote = () => {
+    pushSnapshot();
+    deleteElements({ nodes: [{ id }] });
+  };
 
   const createCluster = () => {
     const currentNode = getNode(id);
     if (!currentNode) return;
+    pushSnapshot();
     addNodes({
       id: crypto.randomUUID(),
       type: "clusterNode",
@@ -93,6 +106,8 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
   };
 
   const enterEditMode = () => {
+    // Snapshot before editing so body changes are undoable as a single step.
+    pushSnapshot();
     setEditing(true);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };

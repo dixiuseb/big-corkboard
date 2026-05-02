@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { Panel, useReactFlow } from "@xyflow/react";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import { useUndoContext } from "@/lib/UndoContext";
 
 type ToolbarProps = {
   connecting: boolean;
@@ -11,6 +12,7 @@ type ToolbarProps = {
 
 export function Toolbar({ connecting, onToggleConnecting }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
+  const { pushSnapshot } = useUndoContext();
 
   const centrePosition = useCallback(
     () =>
@@ -22,15 +24,17 @@ export function Toolbar({ connecting, onToggleConnecting }: ToolbarProps) {
   );
 
   const addNote = useCallback(() => {
+    pushSnapshot();
     addNodes({
       id: crypto.randomUUID(),
       type: "noteCard",
       position: centrePosition(),
       data: { body: "", colorKey: DEFAULT_NOTE_COLOR },
     });
-  }, [addNodes, centrePosition]);
+  }, [addNodes, centrePosition, pushSnapshot]);
 
   const addCluster = useCallback(() => {
+    pushSnapshot();
     addNodes({
       id: crypto.randomUUID(),
       type: "clusterNode",
@@ -40,7 +44,7 @@ export function Toolbar({ connecting, onToggleConnecting }: ToolbarProps) {
         colorKey: DEFAULT_NOTE_COLOR,
       },
     });
-  }, [addNodes, centrePosition]);
+  }, [addNodes, centrePosition, pushSnapshot]);
 
   return (
     <Panel position="top-center" className="m-2">

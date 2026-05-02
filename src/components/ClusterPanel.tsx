@@ -9,6 +9,7 @@ import {
 } from "@/lib/noteColors";
 import type { NoteFormatting } from "@/components/NoteCard";
 import type { ClusterNoteItem } from "@/components/ClusterNode";
+import { useUndoContext } from "@/lib/UndoContext";
 
 type ClusterPanelProps = {
   clusterId: string;
@@ -27,12 +28,14 @@ function PanelNoteCard({
   onSelect,
   onUpdate,
   onDelete,
+  onPushSnapshot,
 }: {
   note: ClusterNoteItem;
   selected: boolean;
   onSelect: () => void;
   onUpdate: (update: Partial<ClusterNoteItem>) => void;
   onDelete: () => void;
+  onPushSnapshot: () => void;
 }) {
   const colorKey = note.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
@@ -56,7 +59,7 @@ function PanelNoteCard({
         ref={textareaRef}
         value={note.body}
         onChange={(e) => onUpdate({ body: e.target.value })}
-        onFocus={onSelect}
+        onFocus={() => { onSelect(); onPushSnapshot(); }}
         onWheel={(e) => e.stopPropagation()}
         placeholder="Note…"
         rows={3}
@@ -89,6 +92,7 @@ export function ClusterPanel({
 }: ClusterPanelProps) {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { pushSnapshot } = useUndoContext();
 
   const selectedNote = notes.find((n) => n.id === selectedNoteId) ?? null;
   const fmt = selectedNote?.formatting ?? {};
@@ -96,6 +100,7 @@ export function ClusterPanel({
 
   const toggleFmt = (key: keyof Omit<NoteFormatting, "fontSize">) => {
     if (!selectedNote) return;
+    pushSnapshot();
     onUpdateNote(selectedNote.id, {
       formatting: { ...fmt, [key]: !fmt[key] },
     });
@@ -103,6 +108,7 @@ export function ClusterPanel({
 
   const setColor = (key: NoteColorKey) => {
     if (!selectedNote) return;
+    pushSnapshot();
     onUpdateNote(selectedNote.id, { colorKey: key });
   };
 
@@ -171,6 +177,7 @@ export function ClusterPanel({
                 onSelect={() => setSelectedNoteId(note.id)}
                 onUpdate={(update) => onUpdateNote(note.id, update)}
                 onDelete={() => onDeleteNote(note.id)}
+                onPushSnapshot={pushSnapshot}
               />
             ))
           )}

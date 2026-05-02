@@ -26,6 +26,7 @@ import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/
 import { ClusterPanel } from "@/components/ClusterPanel";
 import { Toolbar } from "@/components/Toolbar";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import { UndoContext } from "@/lib/UndoContext";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -36,17 +37,58 @@ const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
 const initialNodes: BoardNode[] = [];
 const initialEdges: BoardEdgeType[] = [];
 
+type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[] };
+const MAX_HISTORY = 50;
+
 export function Board() {
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<BoardEdgeType>(initialEdges);
 
-  // Always-fresh ref so drag callbacks don't capture stale node lists.
+  // Always-fresh refs so drag/keyboard callbacks never capture stale state.
   const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  // ── Undo / redo history ───────────────────────────────────────────────────
+  // Two-stack model: each stack holds snapshots of the board state.
+  //
+  //   pushSnapshot()  — call BEFORE a committed action; saves current state to
+  //                     the undo stack and clears the redo stack.
+  //   undo()          — pops the undo stack; pushes current state to redo stack.
+  //   redo()          — pops the redo stack; pushes current state to undo stack.
+  //
+  // Stacks are refs (not state) so pushes don't trigger re-renders.
+  const undoStack = useRef<Snapshot[]>([]);
+  const redoStack = useRef<Snapshot[]>([]);
+
+  const pushSnapshot = useCallback(() => {
+    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
+    // Any new action clears the redo branch.
+    redoStack.current = [];
+  }, []);
+
+  const undo = useCallback(() => {
+    if (undoStack.current.length === 0) return;
+    // Save current live state so redo can return here.
+    redoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    const snap = undoStack.current.pop()!;
+    setNodes(snap.nodes);
+    setEdges(snap.edges);
+  }, [setNodes, setEdges]);
+
+  const redo = useCallback(() => {
+    if (redoStack.current.length === 0) return;
+    // Save current live state so undo can return here.
+    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    const snap = redoStack.current.pop()!;
+    setNodes(snap.nodes);
+    setEdges(snap.edges);
+  }, [setNodes, setEdges]);
 
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
   const prevDropTargetRef = useRef<string | null>(null);
-  const dragStartPositionRef = useRef<XYPosition | null>(null);
 
   // ── Connection mode ────────────────────────────────────────────────────────
   const [connecting, setConnecting] = useState(false);
@@ -57,14 +99,16 @@ export function Board() {
   const edgeTypes = useMemo(() => ({ boardEdge: BoardEdge }), []);
 
   const onConnect = useCallback(
-    (params: Connection) =>
+    (params: Connection) => {
+      pushSnapshot();
       setEdges((eds) =>
         addEdge(
           { ...params, type: "boardEdge", data: { direction: "none" } },
           eds,
         ) as BoardEdgeType[],
-      ),
-    [setEdges],
+      );
+    },
+    [setEdges, pushSnapshot],
   );
 
   // ── Context menu (edge right-click) ───────────────────────────────────────
@@ -78,6 +122,7 @@ export function Board() {
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const setEdgeDirection = useCallback((edgeId: string, direction: EdgeDirection) => {
+    pushSnapshot();
     setEdges((eds) =>
       eds.map((e) =>
         e.id === edgeId
@@ -86,30 +131,70 @@ export function Board() {
       ) as BoardEdgeType[],
     );
     closeContextMenu();
-  }, [setEdges, closeContextMenu]);
+  }, [setEdges, closeContextMenu, pushSnapshot]);
 
   const deleteEdge = useCallback((edgeId: string) => {
+    pushSnapshot();
     setEdges((eds) => eds.filter((e) => e.id !== edgeId) as BoardEdgeType[]);
     closeContextMenu();
-  }, [setEdges, closeContextMenu]);
+  }, [setEdges, closeContextMenu, pushSnapshot]);
 
-  // ── Keyboard: Escape exits connection mode; Backspace deletes selected edges
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isCmd = e.metaKey || e.ctrlKey;
+
+      if (isCmd && !e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (isCmd && e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
       if (e.key === "Escape") {
         setConnecting(false);
         setContextMenu(null);
         return;
       }
+
+      const active = document.activeElement;
+      const inInput = active?.tagName === "INPUT" || active?.tagName === "TEXTAREA";
+      if (inInput) return;
+
+      // Delete key: remove all selected nodes and any edges touching them.
+      if (e.key === "Delete") {
+        const selectedNodeIds = new Set(nodesRef.current.filter((n) => n.selected).map((n) => n.id));
+        const selectedEdgeIds = new Set(edgesRef.current.filter((ed) => ed.selected).map((ed) => ed.id));
+        if (selectedNodeIds.size || selectedEdgeIds.size) {
+          pushSnapshot();
+          setNodes((nds) => nds.filter((n) => !selectedNodeIds.has(n.id)) as BoardNode[]);
+          setEdges((eds) =>
+            eds.filter(
+              (ed) =>
+                !selectedEdgeIds.has(ed.id) &&
+                !selectedNodeIds.has(ed.source) &&
+                !selectedNodeIds.has(ed.target),
+            ) as BoardEdgeType[],
+          );
+        }
+      }
+
+      // Backspace: remove only selected edges (never nodes — protects text inputs).
       if (e.key === "Backspace") {
-        const active = document.activeElement;
-        if (active?.tagName === "INPUT" || active?.tagName === "TEXTAREA") return;
-        setEdges((eds) => eds.filter((edge) => !edge.selected) as BoardEdgeType[]);
+        const selectedEdges = edgesRef.current.filter((ed) => ed.selected);
+        if (selectedEdges.length) {
+          pushSnapshot();
+          setEdges((eds) => eds.filter((ed) => !ed.selected) as BoardEdgeType[]);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setEdges]);
+  }, [undo, redo, pushSnapshot, setNodes, setEdges]);
 
   // ── Cluster panel state ────────────────────────────────────────────────────
   const expandedCluster = useMemo(
@@ -156,6 +241,7 @@ export function Board() {
   const handleDeleteNote = useCallback(
     (noteId: string) => {
       if (!expandedCluster) return;
+      pushSnapshot();
       const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
       if (remaining.length === 0) {
         setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
@@ -166,16 +252,18 @@ export function Board() {
         }));
       }
     },
-    [expandedCluster, setNodes, updateClusterNodes],
+    [expandedCluster, setNodes, updateClusterNodes, pushSnapshot],
   );
 
   const handleDeleteCluster = useCallback(() => {
     if (!expandedCluster) return;
+    pushSnapshot();
     setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
-  }, [expandedCluster, setNodes]);
+  }, [expandedCluster, setNodes, pushSnapshot]);
 
   const handleUncluster = useCallback(() => {
     if (!expandedCluster) return;
+    pushSnapshot();
     const { position, data } = expandedCluster;
     const looseNotes: NoteFlowNode[] = data.notes.map((note, i) => ({
       id: crypto.randomUUID(),
@@ -191,10 +279,11 @@ export function Board() {
       ...nds.filter((n) => n.id !== expandedCluster.id),
       ...looseNotes,
     ]);
-  }, [expandedCluster, setNodes]);
+  }, [expandedCluster, setNodes, pushSnapshot]);
 
   const handleAddNote = useCallback(() => {
     if (!expandedCluster) return;
+    pushSnapshot();
     const newNote: ClusterNoteItem = {
       id: crypto.randomUUID(),
       body: "",
@@ -204,14 +293,14 @@ export function Board() {
       ...n,
       data: { ...n.data, notes: [...n.data.notes, newNote] },
     }));
-  }, [expandedCluster, updateClusterNodes]);
+  }, [expandedCluster, updateClusterNodes, pushSnapshot]);
 
   // ── Drag-to-pin handlers ──────────────────────────────────────────────────
 
-  const onNodeDragStart = useCallback((_: React.MouseEvent, draggedNode: Node) => {
-    if (draggedNode.type !== "noteCard") return;
-    dragStartPositionRef.current = { ...draggedNode.position };
-  }, []);
+  const onNodeDragStart = useCallback(() => {
+    // Snapshot the board state before the drag begins so the move (or pin) is undoable.
+    pushSnapshot();
+  }, [pushSnapshot]);
 
   const onNodeDrag = useCallback((_: React.MouseEvent, draggedNode: Node) => {
     if (draggedNode.type !== "noteCard") return;
@@ -279,21 +368,16 @@ export function Board() {
     if (draggedNode.type !== "noteCard" || !targetId) return;
 
     const noteNode = draggedNode as NoteFlowNode;
-    const startPosition = dragStartPositionRef.current ?? noteNode.position;
-    dragStartPositionRef.current = null;
-
     const targetNode = nodesRef.current.find((n) => n.id === targetId);
     if (!targetNode) return;
 
     if (targetNode.type === "clusterNode") {
-      const addedNoteId = crypto.randomUUID();
       const newNote: ClusterNoteItem = {
-        id: addedNoteId,
+        id: crypto.randomUUID(),
         body: noteNode.data.body,
         colorKey: noteNode.data.colorKey,
         formatting: noteNode.data.formatting,
       };
-      void startPosition; // captured for future undo
       setNodes((nds) =>
         nds
           .filter((n) => n.id !== draggedNode.id)
@@ -336,94 +420,98 @@ export function Board() {
     ? (edges.find((e) => e.id === contextMenu.edgeId) as BoardEdgeType | undefined)
     : null;
 
+  const undoContextValue = useMemo(() => ({ pushSnapshot }), [pushSnapshot]);
+
   return (
-    <div
-      className="h-dvh w-full bg-white dark:bg-neutral-900"
-      data-connecting={connecting ? "true" : undefined}
-      onClick={contextMenu ? closeContextMenu : undefined}
-      onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
-    >
-      <ReactFlow
-        className="h-full w-full touch-manipulation"
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onEdgeContextMenu={onEdgeContextMenu}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        fitView
-        fitViewOptions={{ padding: 0.35 }}
-        minZoom={0.15}
-        maxZoom={2}
-        connectionMode={ConnectionMode.Loose}
-        connectionLineType={ConnectionLineType.Straight}
-        deleteKeyCode="Delete"
-        defaultEdgeOptions={{ type: "boardEdge" }}
+    <UndoContext.Provider value={undoContextValue}>
+      <div
+        className="h-dvh w-full bg-white dark:bg-neutral-900"
+        data-connecting={connecting ? "true" : undefined}
+        onClick={contextMenu ? closeContextMenu : undefined}
+        onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
       >
-        <Toolbar connecting={connecting} onToggleConnecting={toggleConnecting} />
-        <Background gap={18} size={1} className="opacity-40" />
-        <Controls />
-      </ReactFlow>
-
-      {/* Cluster side panel */}
-      {expandedCluster && (
-        <ClusterPanel
-          clusterId={expandedCluster.id}
-          notes={expandedCluster.data.notes}
-          onUpdateNote={handleUpdateNote}
-          onDeleteNote={handleDeleteNote}
-          onAddNote={handleAddNote}
-          onClose={handleClosePanel}
-          onDeleteCluster={handleDeleteCluster}
-          onUncluster={handleUncluster}
-        />
-      )}
-
-      {/* Edge right-click context menu */}
-      {contextMenu && contextEdge && (
-        <div
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-black/10 bg-white shadow-xl dark:border-white/10 dark:bg-neutral-800"
-          onClick={(e) => e.stopPropagation()}
+        <ReactFlow
+          className="h-full w-full touch-manipulation"
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onEdgeContextMenu={onEdgeContextMenu}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          fitView
+          fitViewOptions={{ padding: 0.35 }}
+          minZoom={0.15}
+          maxZoom={2}
+          connectionMode={ConnectionMode.Loose}
+          connectionLineType={ConnectionLineType.Straight}
+          deleteKeyCode={null}
+          defaultEdgeOptions={{ type: "boardEdge" }}
         >
-          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">
-            Direction
-          </div>
-          {DIRECTION_CYCLE.map((dir) => {
-            const active = contextEdge.data?.direction === dir;
-            return (
-              <button
-                key={dir}
-                type="button"
-                onClick={() => setEdgeDirection(contextMenu.edgeId, dir)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/8 ${
-                  active
-                    ? "font-medium text-indigo-600 dark:text-indigo-400"
-                    : "text-black/70 dark:text-white/70"
-                }`}
-              >
-                {active
-                  ? <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
-                  : <span className="h-1.5 w-1.5" />}
-                {DIRECTION_LABELS[dir]}
-              </button>
-            );
-          })}
-          <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
-          <button
-            type="button"
-            onClick={() => deleteEdge(contextMenu.edgeId)}
-            className="flex w-full items-center px-3 py-2 text-sm text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+          <Toolbar connecting={connecting} onToggleConnecting={toggleConnecting} />
+          <Background gap={18} size={1} className="opacity-40" />
+          <Controls />
+        </ReactFlow>
+
+        {/* Cluster side panel */}
+        {expandedCluster && (
+          <ClusterPanel
+            clusterId={expandedCluster.id}
+            notes={expandedCluster.data.notes}
+            onUpdateNote={handleUpdateNote}
+            onDeleteNote={handleDeleteNote}
+            onAddNote={handleAddNote}
+            onClose={handleClosePanel}
+            onDeleteCluster={handleDeleteCluster}
+            onUncluster={handleUncluster}
+          />
+        )}
+
+        {/* Edge right-click context menu */}
+        {contextMenu && contextEdge && (
+          <div
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-black/10 bg-white shadow-xl dark:border-white/10 dark:bg-neutral-800"
+            onClick={(e) => e.stopPropagation()}
           >
-            <span className="ml-3.5">Delete edge</span>
-          </button>
-        </div>
-      )}
-    </div>
+            <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">
+              Direction
+            </div>
+            {DIRECTION_CYCLE.map((dir) => {
+              const active = contextEdge.data?.direction === dir;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={() => setEdgeDirection(contextMenu.edgeId, dir)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/8 ${
+                    active
+                      ? "font-medium text-indigo-600 dark:text-indigo-400"
+                      : "text-black/70 dark:text-white/70"
+                  }`}
+                >
+                  {active
+                    ? <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                    : <span className="h-1.5 w-1.5" />}
+                  {DIRECTION_LABELS[dir]}
+                </button>
+              );
+            })}
+            <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
+            <button
+              type="button"
+              onClick={() => deleteEdge(contextMenu.edgeId)}
+              className="flex w-full items-center px-3 py-2 text-sm text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+            >
+              <span className="ml-3.5">Delete edge</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </UndoContext.Provider>
   );
 }
