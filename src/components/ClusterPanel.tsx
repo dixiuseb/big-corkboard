@@ -20,6 +20,7 @@ type ClusterPanelProps = {
   onClose: () => void;
   onDeleteCluster: () => void;
   onUncluster: () => void;
+  onReorderNotes: (reorderedNotes: ClusterNoteItem[]) => void;
 };
 
 function PanelNoteCard({
@@ -29,6 +30,9 @@ function PanelNoteCard({
   onUpdate,
   onDelete,
   onPushSnapshot,
+  onDragStartReorder,
+  onDragEnterCard,
+  onDragEndReorder,
 }: {
   note: ClusterNoteItem;
   selected: boolean;
@@ -36,6 +40,9 @@ function PanelNoteCard({
   onUpdate: (update: Partial<ClusterNoteItem>) => void;
   onDelete: () => void;
   onPushSnapshot: () => void;
+  onDragStartReorder: () => void;
+  onDragEnterCard: () => void;
+  onDragEndReorder: () => void;
 }) {
   const colorKey = note.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
@@ -53,8 +60,35 @@ function PanelNoteCard({
   return (
     <div
       onClick={onSelect}
+      onDragEnter={onDragEnterCard}
       className={`group relative cursor-pointer rounded-lg border shadow-sm transition-shadow ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ${palette.selectedRing}` : "ring-0"}`}
     >
+      {/* Drag handle — drag within panel to reorder; drag onto canvas to pull out. */}
+      <div
+        draggable
+        onDragStart={(e) => {
+          e.stopPropagation();
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData(
+            "application/x-corkboard-note",
+            JSON.stringify(note),
+          );
+          onDragStartReorder();
+        }}
+        onDragEnd={onDragEndReorder}
+        title="Drag to reorder or drag to canvas to pull out"
+        className="flex cursor-grab items-center justify-center py-1 opacity-0 transition-opacity group-hover:opacity-40 active:cursor-grabbing"
+      >
+        <svg width="14" height="8" viewBox="0 0 14 8" fill="currentColor">
+          <circle cx="2" cy="2" r="1.2" />
+          <circle cx="7" cy="2" r="1.2" />
+          <circle cx="12" cy="2" r="1.2" />
+          <circle cx="2" cy="6" r="1.2" />
+          <circle cx="7" cy="6" r="1.2" />
+          <circle cx="12" cy="6" r="1.2" />
+        </svg>
+      </div>
+
       <textarea
         ref={textareaRef}
         value={note.body}
@@ -89,10 +123,37 @@ export function ClusterPanel({
   onClose,
   onDeleteCluster,
   onUncluster,
+  onReorderNotes,
 }: ClusterPanelProps) {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { pushSnapshot } = useUndoContext();
+
+  // ── Reorder drag state ────────────────────────────────────────────────────
+  const [reorderDragIndex, setReorderDragIndex] = useState<number | null>(null);
+  const [reorderOverIndex, setReorderOverIndex] = useState<number | null>(null);
+
+  const handleReorderDragEnd = () => {
+    setReorderDragIndex(null);
+    setReorderOverIndex(null);
+  };
+
+  const handleListDrop = (e: React.DragEvent) => {
+    // Always stop propagation so drops anywhere inside the panel never reach
+    // the canvas drop handler — notes stay in the cluster if released here.
+    e.stopPropagation();
+    if (
+      reorderDragIndex !== null &&
+      reorderOverIndex !== null &&
+      reorderDragIndex !== reorderOverIndex
+    ) {
+      const next = [...notes];
+      const [moved] = next.splice(reorderDragIndex, 1);
+      next.splice(reorderOverIndex, 0, moved);
+      onReorderNotes(next);
+    }
+    handleReorderDragEnd();
+  };
 
   const selectedNote = notes.find((n) => n.id === selectedNoteId) ?? null;
   const fmt = selectedNote?.formatting ?? {};
@@ -114,7 +175,18 @@ export function ClusterPanel({
 
   return (
     <div className="pointer-events-none fixed bottom-9 right-0 top-0 z-50 flex w-80 flex-col">
-      <div className="pointer-events-auto flex h-full flex-col rounded-l-2xl border-y border-l border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
+      {/* pointer-events-auto wrapper also absorbs all drag events so dropping
+          anywhere over the panel never falls through to the canvas handler. */}
+      <div
+        className="pointer-events-auto flex h-full flex-col rounded-l-2xl border-y border-l border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        onDrop={(e) => e.stopPropagation()}
+      >
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-black/8 px-4 py-3 dark:border-white/8">
@@ -164,22 +236,48 @@ export function ClusterPanel({
           </div>
         </div>
 
-        {/* Notes list */}
-        <div className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
+        {/* Notes list — also the primary reorder drop zone */}
+        <div
+          className="flex-1 overflow-y-auto px-4 py-4"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDrop={handleListDrop}
+        >
           {notes.length === 0 ? (
             <p className="pt-8 text-center text-sm text-black/30 dark:text-white/30">No notes yet</p>
           ) : (
-            notes.map((note) => (
-              <PanelNoteCard
-                key={note.id}
-                note={note}
-                selected={selectedNoteId === note.id}
-                onSelect={() => setSelectedNoteId(note.id)}
-                onUpdate={(update) => onUpdateNote(note.id, update)}
-                onDelete={() => onDeleteNote(note.id)}
-                onPushSnapshot={pushSnapshot}
-              />
-            ))
+            <div className="space-y-2.5">
+              {notes.map((note, i) => {
+                const showInsertLine =
+                  reorderDragIndex !== null &&
+                  reorderOverIndex === i &&
+                  reorderDragIndex !== i;
+                return (
+                  <div key={note.id}>
+                    {/* Insertion indicator — appears above the drop-target card */}
+                    {showInsertLine && (
+                      <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
+                    )}
+                    <PanelNoteCard
+                      note={note}
+                      selected={selectedNoteId === note.id}
+                      onSelect={() => setSelectedNoteId(note.id)}
+                      onUpdate={(update) => onUpdateNote(note.id, update)}
+                      onDelete={() => onDeleteNote(note.id)}
+                      onPushSnapshot={pushSnapshot}
+                      onDragStartReorder={() => setReorderDragIndex(i)}
+                      onDragEnterCard={() => setReorderOverIndex(i)}
+                      onDragEndReorder={handleReorderDragEnd}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 

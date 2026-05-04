@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -84,6 +84,16 @@ function ViewportResetter({ signal }: { signal: number }) {
   return null;
 }
 
+// ── screenToFlowPosition capture (must live inside the ReactFlow provider) ────
+// Assigns the latest screenToFlowPosition to a ref so the outer drop handler
+// (which can't call hooks itself) can convert screen coords to canvas coords.
+type SFPFn = (pos: XYPosition) => XYPosition;
+function SFPCapture({ sfpRef }: { sfpRef: React.MutableRefObject<SFPFn | null> }) {
+  const { screenToFlowPosition } = useReactFlow();
+  sfpRef.current = screenToFlowPosition;
+  return null;
+}
+
 // ── BoardCanvas ──────────────────────────────────────────────────────────────
 // Renders the React Flow canvas for a single board. Keyed by boardId in the
 // outer Board shell so React remounts it cleanly whenever the active board changes.
@@ -138,6 +148,9 @@ function BoardCanvas({ boardId }: { boardId: string }) {
 
   // Signal for ViewportResetter (incremented on "Clear board").
   const [resetViewportSignal, setResetViewportSignal] = useState(0);
+
+  // Capture screenToFlowPosition from inside the ReactFlow provider via SFPCapture.
+  const sfpRef = useRef<SFPFn | null>(null);
 
   // Always-fresh refs so drag/keyboard callbacks never capture stale state.
   const nodesRef = useRef(nodes);
@@ -399,6 +412,15 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     }));
   }, [expandedCluster, updateClusterNodes, pushSnapshot]);
 
+  const handleReorderNotes = useCallback((reorderedNotes: ClusterNoteItem[]) => {
+    if (!expandedCluster) return;
+    pushSnapshot();
+    updateClusterNodes(expandedCluster.id, (n) => ({
+      ...n,
+      data: { ...n.data, notes: reorderedNotes },
+    }));
+  }, [expandedCluster, updateClusterNodes, pushSnapshot]);
+
   // ── Drag-to-pin handlers ──────────────────────────────────────────────────
 
   const onNodeDragStart = useCallback(() => {
@@ -512,6 +534,68 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     }
   }, [setNodes]);
 
+  // ── Drag-out from cluster panel ───────────────────────────────────────────
+  // Notes dragged from ClusterPanel land on the canvas as loose noteCard nodes.
+  // The DataTransfer carries the serialised ClusterNoteItem JSON so we don't
+  // need any shared React state between the panel and the canvas.
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  }, []);
+
+  const handleCanvasDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData("application/x-corkboard-note");
+    if (!raw || !sfpRef.current) return;
+    let note: ClusterNoteItem;
+    try {
+      note = JSON.parse(raw) as ClusterNoteItem;
+    } catch {
+      return;
+    }
+
+    // Locate the cluster that owns this note (use fresh ref so we see latest state).
+    const cluster = nodesRef.current.find(
+      (n): n is ClusterFlowNode =>
+        n.type === "clusterNode" &&
+        (n as ClusterFlowNode).data.notes.some((nn) => nn.id === note.id),
+    );
+    if (!cluster) return;
+
+    pushSnapshot();
+
+    // Convert the screen drop position to flow canvas coordinates.
+    // Offset so the note is centred horizontally and anchored near the cursor.
+    const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
+    const position: XYPosition = { x: canvasPos.x - 120, y: canvasPos.y - 20 };
+
+    const newNote: NoteFlowNode = {
+      id: crypto.randomUUID(),
+      type: "noteCard",
+      position,
+      data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+    };
+
+    const remaining = cluster.data.notes.filter((n) => n.id !== note.id);
+
+    setNodes((nds) => {
+      const withoutCluster = nds.filter((n) => n.id !== cluster.id);
+      if (remaining.length === 0) {
+        // Cluster is empty — remove it, place just the note.
+        return [...withoutCluster, newNote];
+      }
+      // Keep the cluster (without the dragged note), add the loose note.
+      const updatedCluster: ClusterFlowNode = {
+        ...cluster,
+        data: { ...cluster.data, notes: remaining },
+      };
+      return [...withoutCluster, updatedCluster, newNote];
+    });
+  }, [pushSnapshot, setNodes]);
+
   // ── Context menu direction labels ─────────────────────────────────────────
   const DIRECTION_LABELS: Record<EdgeDirection, string> = {
     none: "— No arrow",
@@ -547,6 +631,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         data-connecting={connecting ? "true" : undefined}
         onClick={contextMenu ? closeContextMenu : undefined}
         onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
+        onDragOver={handleCanvasDragOver}
+        onDrop={handleCanvasDrop}
       >
         <ReactFlow
           className="h-full w-full touch-manipulation"
@@ -582,6 +668,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           <Background gap={18} size={1} className="opacity-40" />
           <Controls />
           <ViewportResetter signal={resetViewportSignal} />
+          <SFPCapture sfpRef={sfpRef} />
         </ReactFlow>
 
         {/* Cluster side panel */}
@@ -595,6 +682,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             onClose={handleClosePanel}
             onDeleteCluster={handleDeleteCluster}
             onUncluster={handleUncluster}
+            onReorderNotes={handleReorderNotes}
           />
         )}
 
