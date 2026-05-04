@@ -192,6 +192,72 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 
 - **Not in v1.** Clusters are modelled as containers (array of note objects). The jump to "a cluster contains nodes / sub-boards" is a data-shape extension, not a rewrite.
 
+### Search & filtering (v2)
+
+- `Cmd/Ctrl+F` opens a search bar that slides down from / overlays the top toolbar.
+- **Scope**: full-text match against all note bodies on the current board — canvas notes and notes inside clusters.
+- **Highlight mode**: matching notes glow; non-matching notes and clusters dim in place. The canvas doesn't auto-scroll — the user pans to highlighted results themselves.
+- **Filter by color**: clicking a color swatch in the color-label legend (v2) dims everything that doesn't match that color. The filter stays active until `Escape` is pressed or the swatch is clicked again.
+- Cross-board search (searching all boards at once) is out of scope for v2 — scope is always the active board.
+
+### Export (v2)
+
+- **Export to PNG**: rasterizes the React Flow canvas using `html-to-image` (or similar). The user can choose "current view" (whatever is visible at the current zoom) or "fit all" (zoom-to-fit the whole board, then capture). The downloaded file name defaults to the board title.
+- **Export to JSON**: downloads the raw board state (`nodes`, `edges`, `viewport`) as a `.json` file — useful as a manual backup and as an import format for restoring a board.
+- No PDF or shareable link in v2; shareable links require the cloud sync backend introduced in v3.
+
+### Image nodes (v3)
+
+Images are **first-class canvas objects** — a new `imageNode` node type that behaves identically to a note card on the canvas:
+
+- Drag freely, connect with edges, drag-to-pin into clusters.
+- **Adding**: drag an image file onto the canvas, or paste from the clipboard while the canvas is focused and no note is in edit mode.
+- **Resizing**: a horizontal resize handle (same mechanic as note cards).
+- **`NodeToolbar` on selection**: color swatch (applies a tinted border/frame for category), optional caption field, delete button. No text formatting controls (there's no text body).
+- **Storage**: image blobs are too large for `localStorage`. Blobs are stored in **IndexedDB** keyed by a UUID; the board's serialised state only stores the UUID reference. When cloud sync is active, blobs are uploaded to **Supabase Storage** and the reference becomes a Storage URL.
+
+Data model addition:
+
+```ts
+type ImageNode = {
+  id: string
+  type: 'image'
+  colorKey: Color       // border/frame tint for category
+  imageRef: string      // UUID → IndexedDB (local) or Storage URL (cloud)
+  caption?: string
+  position: { x: number; y: number }
+  width: number         // user-resizable
+}
+```
+
+Clusters can contain image nodes alongside notes. The data model change is `ClusterNode.items: (NoteCard | ImageNode)[]` replacing `ClusterNode.notes`.
+
+### Cloud sync (v3)
+
+Single-user sync across devices via **Supabase**.
+
+- **Auth**: email magic-link + Google OAuth. No account required — the app is fully functional in local-only mode indefinitely.
+- **Data flow**: `localStorage` remains the offline source of truth. On sign-in, boards are pushed to Supabase and kept in sync. Conflict strategy for v1: last-write-wins per board (simple for a solo-user scenario).
+- **Supabase schema** (mirrors the existing data shape closely):
+  - `boards(id, user_id, title, viewport, color_labels, updated_at)`
+  - `nodes(id, board_id, type, position, data)` — `data` stored as JSONB
+  - `edges(id, board_id, source, target, data)`
+  - `storage/images/{user_id}/{image_id}` — image blobs (Supabase Storage)
+- **Real-time co-editing and shareable links**: out of scope for v3 — these are v4 additions.
+
+### Mobile (v3, alongside cloud sync)
+
+The web app is wrapped with **[Capacitor](https://capacitorjs.com/)** for iOS and Android. The same Next.js codebase is exported as a static build and embedded in the native shell.
+
+Key touch tuning required:
+
+- **Keyboard avoidance**: when a note enters edit mode the canvas must scroll up so the focused `textarea` isn't hidden behind the soft keyboard. Use Capacitor's `KeyboardPlugin` to read the keyboard height and apply a matching bottom offset.
+- **Safe areas**: the top toolbar and bottom tab bar need `env(safe-area-inset-*)` padding for notch and home-indicator devices.
+- **Haptic feedback**: light tap feedback on drag-to-pin drops and cluster creation via Capacitor's `HapticsPlugin`.
+- **Pinch-to-zoom**: React Flow handles two-finger pinch natively; sensitivity limits (`minZoom` / `maxZoom`) may need tuning for touch.
+- **Connection mode**: tap-based handle interaction already works because handles are only shown in connection mode — no hover state required.
+- **Offline / sync**: Capacitor's `Network` plugin gates sync calls so they only fire when the device is online.
+
 ## Roadmap (high level)
 
 1. **Canvas + note nodes** ✓ — full-screen canvas; notecards with color, drag, double-click-to-edit.
@@ -201,21 +267,33 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 5. **Connections** ✓ — labeled edges; handles visible in connection mode only; direction toggle via right-click; note ↔ cluster ↔ cluster connections.
 6. **Undo / redo** ✓ — full history stack (capped ~50); `Cmd+Z` / `Cmd+Shift+Z` keyboard shortcuts; undo/redo buttons in the top toolbar (disabled when unavailable); snapshots on committed actions (drag stop, create, delete, pin, edge ops, text blur, format change); no per-keystroke snapshots.
 7. **Persistence** ✓ — debounced auto-save (~500 ms) on every node/edge change, plus immediate save on viewport change (`onMoveEnd`). Separate `corkboard:boards` and `corkboard:board:{id}` localStorage keys. First load with no saved data auto-creates "Board 1". `Board` loaded via `next/dynamic` with `ssr: false` so localStorage is always available. **Clear board** button in the top toolbar: `window.confirm` dialog, then wipes nodes, edges, and resets viewport (via inner `ViewportResetter` component); clears undo/redo history.
-8. **Multiple boards** — bottom tab bar (max 8); rename/drag-reorder; auto-create on last-delete.
+8. **Multiple boards** ✓ — spreadsheet-style tab bar at the bottom; max 8 boards; "+" button hidden at the limit. Tabs: click to switch (active board saved immediately on unmount), double-click to rename inline, drag to reorder, × to delete (with confirm). Deleting the last board auto-creates "Board 1". Last-active board persisted to `corkboard:activeBoard`.
 9. **Drag-out from cluster panel** — drag a note from the side panel back onto the canvas. *(Deferred — most complex interaction.)*
 
-Post-v1 backlog (in rough priority order):
-- **Color label legend** (v2) — legend strip + "Assign category" editor at the bottom of the canvas.
-- **Neon note palette** (v2) — a second set of vivid colors designed for dark canvases; switchable per board.
-- **Filter by category** (v3) — list all notes of a given color across the whole board.
-- **User-defined colors and themes** (v3) — custom hex values per note, custom board backgrounds, full palette control.
-- Sync / auth (Supabase or similar).
-- Deeply nested boards (clusters containing sub-boards).
-- Color legend editor.
+Post-v1 backlog:
 
-### Mobile apps (future)
+**v2** — polish and power features, no backend required:
+- Color label legend + filter by color (legend strip, "Assign category" editor)
+- Neon/vivid note palette designed for dark canvases
+- Search & filter on the active board (`Cmd+F`, highlight mode, filter by color)
+- Export to PNG and JSON
+- Drag-out from cluster panel (deferred from v1)
 
-The web app stays the source of truth. When native shells are worth the overhead, **[Capacitor](https://capacitorjs.com/)** wraps the Next export for iOS/Android — expect touch tuning (pan/zoom, text inputs on canvas) as follow-up work.
+**v3** — backend and native:
+- Image nodes (IndexedDB for local blob storage, Supabase Storage for cloud)
+- Cloud sync — Supabase auth (magic-link + Google), single-user cross-device
+- User-defined colors and themes (custom hex per note, custom board backgrounds)
+- Capacitor mobile packaging + touch polish (keyboard avoidance, haptics, safe areas)
+- Nested corkboards / cluster-as-sub-board
+
+**v4** — collaboration:
+- Shareable read-only links
+- Real-time co-editing (Supabase Realtime + CRDT conflict resolution)
+- Full-text search across all boards
+
+### Mobile apps (v3)
+
+The web app is wrapped with **[Capacitor](https://capacitorjs.com/)** for iOS and Android as part of the v3 milestone. See the full spec above under [Mobile](#mobile-v3-alongside-cloud-sync).
 
 ## Development
 
