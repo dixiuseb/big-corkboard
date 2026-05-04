@@ -96,8 +96,11 @@ export function Toolbar({
   const fontSize = formatting.fontSize ?? "md";
 
   return (
-    <Panel position="top-center" className="m-2">
-      <div className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/90 px-3 py-2 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-neutral-800/90">
+    <Panel
+      position="top-left"
+      className="!m-0 inset-x-0 w-full max-w-none border-b border-black/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
+    >
+      <div className="flex min-h-12 w-full min-w-0 flex-nowrap items-center gap-x-2 gap-y-1 overflow-x-auto px-4 py-2.5">
 
         {/* Undo / Redo */}
         <button
