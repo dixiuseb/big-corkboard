@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   type NoteColorKey,
   NOTE_COLOR_KEYS,
@@ -21,6 +21,7 @@ type ClusterPanelProps = {
   onDeleteCluster: () => void;
   onUncluster: () => void;
   onReorderNotes: (reorderedNotes: ClusterNoteItem[]) => void;
+  clearGhostRef?: React.MutableRefObject<() => void>;
 };
 
 function PanelNoteCard({
@@ -33,6 +34,9 @@ function PanelNoteCard({
   onDragStartReorder,
   onDragEnterCard,
   onDragEndReorder,
+  onDragStartGhost,
+  onDragMoveGhost,
+  onDragEndGhost,
 }: {
   note: ClusterNoteItem;
   selected: boolean;
@@ -43,6 +47,9 @@ function PanelNoteCard({
   onDragStartReorder: () => void;
   onDragEnterCard: () => void;
   onDragEndReorder: () => void;
+  onDragStartGhost: (x: number, y: number) => void;
+  onDragMoveGhost: (x: number, y: number) => void;
+  onDragEndGhost: () => void;
 }) {
   const colorKey = note.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
@@ -69,13 +76,26 @@ function PanelNoteCard({
         onDragStart={(e) => {
           e.stopPropagation();
           e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData(
-            "application/x-corkboard-note",
-            JSON.stringify(note),
-          );
+          e.dataTransfer.setData("application/x-corkboard-note", JSON.stringify(note));
+          // Suppress the browser's default ghost image so our custom ghost takes over.
+          const empty = new Image();
+          empty.src =
+            "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+          e.dataTransfer.setDragImage(empty, 0, 0);
           onDragStartReorder();
+          onDragStartGhost(e.clientX, e.clientY);
         }}
-        onDragEnd={onDragEndReorder}
+        onDrag={(e) => {
+          // clientX/Y are 0,0 on the final event before dragend — skip those.
+          if (e.clientX !== 0 || e.clientY !== 0) {
+            onDragMoveGhost(e.clientX, e.clientY);
+          }
+        }}
+        onDragEnd={(e) => {
+          onDragEndReorder();
+          onDragEndGhost();
+          void e;
+        }}
         title="Drag to reorder or drag to canvas to pull out"
         className="flex cursor-grab items-center justify-center py-1 opacity-0 transition-opacity group-hover:opacity-40 active:cursor-grabbing"
       >
@@ -124,6 +144,7 @@ export function ClusterPanel({
   onDeleteCluster,
   onUncluster,
   onReorderNotes,
+  clearGhostRef,
 }: ClusterPanelProps) {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -132,6 +153,48 @@ export function ClusterPanel({
   // ── Reorder drag state ────────────────────────────────────────────────────
   const [reorderDragIndex, setReorderDragIndex] = useState<number | null>(null);
   const [reorderOverIndex, setReorderOverIndex] = useState<number | null>(null);
+
+  // ── Drag-out ghost state ──────────────────────────────────────────────────
+  const [ghostNote, setGhostNote] = useState<ClusterNoteItem | null>(null);
+  const [ghostPos, setGhostPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Hold a stable reference to the current dragend cleanup so we can remove it.
+  // We register the listener synchronously inside the drag-start callback (not in a
+  // useEffect) because useEffect runs after the paint — too late for a fast drag that
+  // starts and ends before the next frame.
+  const ghostListenerRef = useRef<(() => void) | null>(null);
+
+  const startGhost = useCallback((note: ClusterNoteItem, x: number, y: number) => {
+    // Clear any stale listener from a previous drag that never fully cleaned up.
+    if (ghostListenerRef.current) {
+      document.removeEventListener("dragend", ghostListenerRef.current);
+    }
+    const clear = () => {
+      setGhostNote(null);
+      ghostListenerRef.current = null;
+    };
+    ghostListenerRef.current = clear;
+    document.addEventListener("dragend", clear, { once: true });
+    setGhostNote(note);
+    setGhostPos({ x, y });
+  }, []);
+
+  const endGhost = useCallback(() => {
+    setGhostNote(null);
+    // If the element's onDragEnd fires first, remove the document listener so it
+    // doesn't double-fire.
+    if (ghostListenerRef.current) {
+      document.removeEventListener("dragend", ghostListenerRef.current);
+      ghostListenerRef.current = null;
+    }
+  }, []);
+
+  // Let BoardCanvas call endGhost directly via the ref it passes down.
+  // This fires synchronously inside handleCanvasDrop, guaranteeing the ghost
+  // clears even when the drag source unmounts before "dragend" can fire.
+  useLayoutEffect(() => {
+    if (clearGhostRef) clearGhostRef.current = endGhost;
+  }, [clearGhostRef, endGhost]);
 
   const handleReorderDragEnd = () => {
     setReorderDragIndex(null);
@@ -173,7 +236,28 @@ export function ClusterPanel({
     onUpdateNote(selectedNote.id, { colorKey: key });
   };
 
+  const ghostPalette = NOTE_COLOR_META[ghostNote?.colorKey ?? DEFAULT_NOTE_COLOR];
+
   return (
+    <>
+    {/* Ghost card that follows the cursor during drag-out */}
+    {ghostNote && (
+      <div
+        className={`pointer-events-none fixed z-[9999] w-60 rounded-xl border shadow-2xl ${ghostPalette.cardClass}`}
+        style={{
+          left: ghostPos.x - 120,
+          top: ghostPos.y - 24,
+          transform: "rotate(-2deg) scale(1.03)",
+          opacity: 0.92,
+          transition: "none",
+        }}
+        aria-hidden
+      >
+        <p className="px-3 py-3 text-sm leading-snug text-stone-700">
+          {ghostNote.body || <span className="text-stone-400 italic">Note…</span>}
+        </p>
+      </div>
+    )}
     <div className="pointer-events-none fixed bottom-9 right-0 top-0 z-50 flex w-80 flex-col">
       {/* pointer-events-auto wrapper also absorbs all drag events so dropping
           anywhere over the panel never falls through to the canvas handler. */}
@@ -273,6 +357,9 @@ export function ClusterPanel({
                       onDragStartReorder={() => setReorderDragIndex(i)}
                       onDragEnterCard={() => setReorderOverIndex(i)}
                       onDragEndReorder={handleReorderDragEnd}
+                      onDragStartGhost={(x, y) => startGhost(note, x, y)}
+                      onDragMoveGhost={(x, y) => setGhostPos({ x, y })}
+                      onDragEndGhost={endGhost}
                     />
                   </div>
                 );
@@ -329,5 +416,6 @@ export function ClusterPanel({
         </div>
       </div>
     </div>
+    </>
   );
 }

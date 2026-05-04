@@ -151,6 +151,9 @@ function BoardCanvas({ boardId }: { boardId: string }) {
 
   // Capture screenToFlowPosition from inside the ReactFlow provider via SFPCapture.
   const sfpRef = useRef<SFPFn | null>(null);
+  // Called by handleCanvasDrop so ClusterPanel clears its ghost image immediately,
+  // bypassing the unreliable dragend timing when the drag source unmounts first.
+  const clearClusterGhostRef = useRef<() => void>(() => {});
 
   // Always-fresh refs so drag/keyboard callbacks never capture stale state.
   const nodesRef = useRef(nodes);
@@ -594,6 +597,10 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       };
       return [...withoutCluster, updatedCluster, newNote];
     });
+
+    // Explicitly clear the ClusterPanel ghost. dragend is unreliable when the
+    // drag source unmounts before it fires (e.g. when the cluster is deleted).
+    clearClusterGhostRef.current();
   }, [pushSnapshot, setNodes]);
 
   // ── Context menu direction labels ─────────────────────────────────────────
@@ -683,6 +690,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             onDeleteCluster={handleDeleteCluster}
             onUncluster={handleUncluster}
             onReorderNotes={handleReorderNotes}
+            clearGhostRef={clearClusterGhostRef}
           />
         )}
 
