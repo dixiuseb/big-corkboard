@@ -352,18 +352,19 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const handleUpdateNote = useCallback(
     (noteId: string, update: Partial<ClusterNoteItem>) => {
       if (!expandedCluster) return;
-      updateClusterNodes(expandedCluster.id, (n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          notes: n.data.notes.map((note) =>
-            note.id === noteId ? { ...note, ...update } : note,
-          ),
-          colorKey: n.data.notes[0]?.id === noteId
-            ? (update.colorKey ?? n.data.colorKey)
-            : n.data.colorKey,
-        },
-      }));
+      updateClusterNodes(expandedCluster.id, (n) => {
+        const nextNotes = n.data.notes.map((note) =>
+          note.id === noteId ? { ...note, ...update } : note,
+        );
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            notes: nextNotes,
+            colorKey: nextNotes[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+          },
+        };
+      });
     },
     [expandedCluster, updateClusterNodes],
   );
@@ -378,7 +379,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       } else {
         updateClusterNodes(expandedCluster.id, (n) => ({
           ...n,
-          data: { ...n.data, notes: remaining },
+          data: {
+            ...n.data,
+            notes: remaining,
+            colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+          },
         }));
       }
     },
@@ -409,7 +414,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       } else {
         updateClusterNodes(expandedCluster.id, (n) => ({
           ...n,
-          data: { ...n.data, notes: remaining },
+          data: {
+            ...n.data,
+            notes: remaining,
+            colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+          },
         }));
         setNodes((nds) => [...nds, looseNote]);
       }
@@ -462,7 +471,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     pushSnapshot();
     updateClusterNodes(expandedCluster.id, (n) => ({
       ...n,
-      data: { ...n.data, notes: reorderedNotes },
+      data: {
+        ...n.data,
+        notes: reorderedNotes,
+        colorKey: reorderedNotes[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+      },
     }));
   }, [expandedCluster, updateClusterNodes, pushSnapshot]);
 
@@ -774,7 +787,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       // Keep the cluster (without the dragged note), add the loose note.
       const updatedCluster: ClusterFlowNode = {
         ...cluster,
-        data: { ...cluster.data, notes: remaining },
+        data: {
+          ...cluster.data,
+          notes: remaining,
+          colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+        },
       };
       return [...withoutCluster, updatedCluster, newNote];
     });
