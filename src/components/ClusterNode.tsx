@@ -29,7 +29,7 @@ const BACK_CARD_TRANSFORMS = [
 ];
 
 function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
-  const { updateNodeData } = useReactFlow();
+  const { setNodes } = useReactFlow();
   const colorKey = data.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
   const isDropTarget = !!data.isDropTarget;
@@ -40,7 +40,14 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
-    updateNodeData(id, { expanded: true });
+    // Close any other open cluster panel before expanding this one.
+    setNodes((nds: Node[]) =>
+      nds.map((n) => {
+        if (n.type !== "clusterNode") return n;
+        const expanded = n.id === id ? true : false;
+        return n.data.expanded === expanded ? n : { ...n, data: { ...n.data, expanded } };
+      }),
+    );
   };
 
   // Peek height: extra top space so back cards are visible above the front card.
