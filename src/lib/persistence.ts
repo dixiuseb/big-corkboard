@@ -52,3 +52,31 @@ export function saveBoardState(id: string, state: PersistedBoardState): void {
     // Ignore quota errors silently.
   }
 }
+
+export function deleteBoardState(id: string): void {
+  try {
+    localStorage.removeItem(boardKey(id));
+  } catch {
+    // Ignore errors silently.
+  }
+}
+
+// ── Active board tracking ─────────────────────────────────────────────────────
+
+const ACTIVE_BOARD_KEY = "corkboard:activeBoard";
+
+export function loadActiveBoard(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_BOARD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveBoard(id: string): void {
+  try {
+    localStorage.setItem(ACTIVE_BOARD_KEY, id);
+  } catch {
+    // Ignore errors silently.
+  }
+}

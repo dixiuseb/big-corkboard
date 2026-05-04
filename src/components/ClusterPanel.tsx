@@ -113,7 +113,7 @@ export function ClusterPanel({
   };
 
   return (
-    <div className="pointer-events-none fixed inset-y-0 right-0 z-50 flex w-80 flex-col">
+    <div className="pointer-events-none fixed bottom-9 right-0 top-0 z-50 flex w-80 flex-col">
       <div className="pointer-events-auto flex h-full flex-col rounded-l-2xl border-y border-l border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
 
         {/* Header */}

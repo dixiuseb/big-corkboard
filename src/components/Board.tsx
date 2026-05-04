@@ -34,9 +34,13 @@ import {
   saveBoardsMeta,
   loadBoardState,
   saveBoardState,
+  deleteBoardState,
+  loadActiveBoard,
+  saveActiveBoard,
   type BoardMeta,
   type PersistedBoardState,
 } from "@/lib/persistence";
+import { BoardTabs } from "@/components/BoardTabs";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -80,17 +84,11 @@ function ViewportResetter({ signal }: { signal: number }) {
   return null;
 }
 
-export function Board() {
-  // ── Persistence: load saved board on first render ─────────────────────────
-  // page.tsx uses ssr:false so localStorage is always available here.
-  const [boardId] = useState<string>(() => {
-    const meta = loadBoardsMeta();
-    if (meta.length > 0) return meta[0].id;
-    const newId = crypto.randomUUID();
-    saveBoardsMeta([{ id: newId, title: "Board 1" } satisfies BoardMeta]);
-    return newId;
-  });
+// ── BoardCanvas ──────────────────────────────────────────────────────────────
+// Renders the React Flow canvas for a single board. Keyed by boardId in the
+// outer Board shell so React remounts it cleanly whenever the active board changes.
 
+function BoardCanvas({ boardId }: { boardId: string }) {
   const [savedState] = useState<PersistedBoardState | null>(() => loadBoardState(boardId));
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(
@@ -104,6 +102,17 @@ export function Board() {
 
   // Tracks the latest viewport so it's included in auto-saves.
   const viewportRef = useRef<Viewport>(defaultViewport);
+
+  // Save immediately on unmount so unsaved changes aren't lost when switching boards.
+  // boardId is stable within a BoardCanvas instance (enforced by key={boardId} in Board).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    saveBoardState(boardId, {
+      nodes: serializeNodes(nodesRef.current),
+      edges: serializeEdges(edgesRef.current),
+      viewport: viewportRef.current,
+    });
+  }, []);
 
   // ── Debounced auto-save (nodes + edges + current viewport) ────────────────
   useEffect(() => {
@@ -534,7 +543,7 @@ export function Board() {
   return (
     <UndoContext.Provider value={undoContextValue}>
       <div
-        className="h-dvh w-full bg-white dark:bg-neutral-900"
+        className="h-full w-full bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
         onClick={contextMenu ? closeContextMenu : undefined}
         onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
@@ -631,5 +640,90 @@ export function Board() {
         )}
       </div>
     </UndoContext.Provider>
+  );
+}
+
+// ── Board (outer shell) ───────────────────────────────────────────────────────
+// Manages the list of boards, the active board, and the bottom tab bar.
+// Uses key={activeId} on BoardCanvas so React remounts the canvas cleanly on switch.
+
+export function Board() {
+  const [boards, setBoards] = useState<BoardMeta[]>(() => {
+    const meta = loadBoardsMeta();
+    if (meta.length > 0) return meta;
+    const firstId = crypto.randomUUID();
+    const initial: BoardMeta[] = [{ id: firstId, title: "Board 1" }];
+    saveBoardsMeta(initial);
+    return initial;
+  });
+
+  const [activeId, setActiveId] = useState<string>(() => {
+    const savedActive = loadActiveBoard();
+    // Only restore if the board still exists.
+    if (savedActive && boards.some((b) => b.id === savedActive)) return savedActive;
+    return boards[0].id;
+  });
+
+  const persistBoards = useCallback((next: BoardMeta[]) => {
+    setBoards(next);
+    saveBoardsMeta(next);
+  }, []);
+
+  const switchTo = useCallback((id: string) => {
+    setActiveId(id);
+    saveActiveBoard(id);
+  }, []);
+
+  const handleAdd = useCallback(() => {
+    if (boards.length >= 8) return;
+    // Pick the lowest unused "Board N" number.
+    const used = new Set(
+      boards.map((b) => { const m = b.title.match(/^Board (\d+)$/); return m ? +m[1] : 0; }),
+    );
+    let n = 1;
+    while (used.has(n)) n++;
+    const newId = crypto.randomUUID();
+    const next: BoardMeta[] = [...boards, { id: newId, title: `Board ${n}` }];
+    persistBoards(next);
+    switchTo(newId);
+  }, [boards, persistBoards, switchTo]);
+
+  const handleDelete = useCallback((id: string) => {
+    const board = boards.find((b) => b.id === id);
+    if (!board) return;
+    if (!window.confirm(`Delete "${board.title}"? This cannot be undone.`)) return;
+    deleteBoardState(id);
+    let next = boards.filter((b) => b.id !== id);
+    if (next.length === 0) {
+      const newId = crypto.randomUUID();
+      next = [{ id: newId, title: "Board 1" }];
+    }
+    persistBoards(next);
+    if (id === activeId) switchTo(next[0].id);
+  }, [boards, activeId, persistBoards, switchTo]);
+
+  const handleRename = useCallback((id: string, title: string) => {
+    persistBoards(boards.map((b) => (b.id === id ? { ...b, title } : b)));
+  }, [boards, persistBoards]);
+
+  const handleReorder = useCallback((next: BoardMeta[]) => {
+    persistBoards(next);
+  }, [persistBoards]);
+
+  return (
+    <div className="flex h-dvh w-full flex-col">
+      <div className="min-h-0 flex-1">
+        <BoardCanvas key={activeId} boardId={activeId} />
+      </div>
+      <BoardTabs
+        boards={boards}
+        activeId={activeId}
+        onSwitch={switchTo}
+        onAdd={handleAdd}
+        onDelete={handleDelete}
+        onRename={handleRename}
+        onReorder={handleReorder}
+      />
+    </div>
   );
 }
