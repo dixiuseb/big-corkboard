@@ -30,13 +30,14 @@ const BACK_CARD_TRANSFORMS = [
 
 function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { setNodes } = useReactFlow();
-  const colorKey = data.colorKey ?? DEFAULT_NOTE_COLOR;
-  const palette = NOTE_COLOR_META[colorKey];
-  const isDropTarget = !!data.isDropTarget;
   const notes = data.notes ?? [];
   // Cap the visible stack at 3 layers.
   const stackLayers = Math.min(notes.length, 3);
   const frontNote = notes[0];
+  // Front card + handles follow the top note; fall back to cluster colorKey for older data.
+  const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
+  const frontPalette = NOTE_COLOR_META[frontColorKey];
+  const isDropTarget = !!data.isDropTarget;
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -56,37 +57,43 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   return (
     <>
       {/* 8 handles: 4 sides + 4 corners */}
-      <Handle id="t"  type="source" position={Position.Top}                                              style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="b"  type="source" position={Position.Bottom}                                           style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="l"  type="source" position={Position.Left}                                             style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="r"  type="source" position={Position.Right}                                            style={{ backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0,      backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%", backgroundColor: palette.handleColor, borderColor: palette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="t"  type="source" position={Position.Top}                                              style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="b"  type="source" position={Position.Bottom}                                           style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="l"  type="source" position={Position.Left}                                             style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="r"  type="source" position={Position.Right}                                            style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0,      backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%", backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0,      backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
+      <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%", backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
 
       <div
         className="relative"
         style={{ width: 240, paddingTop: peekPadding }}
       >
-        {/* Back cards — one per stack layer behind the front */}
-        {Array.from({ length: stackLayers - 1 }).map((_, i) => (
-          <div
-            key={i}
-            // Render from furthest-back (index 0) to closest-to-front.
-            style={{
-              position: "absolute",
-              inset: 0,
-              transform: BACK_CARD_TRANSFORMS[i],
-              zIndex: i,
-            }}
-            className={`rounded-lg border ${palette.cardClass}`}
-          />
-        ))}
+        {/* Back cards — one per stack layer behind the front; each uses that note's color. */}
+        {Array.from({ length: stackLayers - 1 }).map((_, i) => {
+          // i = 0 is furthest back → last visible note in the capped stack (e.g. notes[2] when 3+ notes).
+          const noteIndex = stackLayers - 1 - i;
+          const backNote = notes[noteIndex];
+          const backKey = backNote?.colorKey ?? DEFAULT_NOTE_COLOR;
+          const backPalette = NOTE_COLOR_META[backKey];
+          return (
+            <div
+              key={`${backNote?.id ?? noteIndex}-${i}`}
+              style={{
+                position: "absolute",
+                inset: 0,
+                transform: BACK_CARD_TRANSFORMS[i],
+                zIndex: i,
+              }}
+              className={`rounded-lg border ${backPalette.cardClass}`}
+            />
+          );
+        })}
 
         {/* Front card */}
         <div
-          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 transition-all ${palette.cardClass} ${isDropTarget ? `${palette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"}`}
+          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 transition-all ${frontPalette.cardClass} ${isDropTarget ? `${frontPalette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${frontPalette.selectedRing} shadow-lg` : "ring-transparent"}`}
           style={{ zIndex: stackLayers }}
         >
           {/* Header row: note count + expand button */}
