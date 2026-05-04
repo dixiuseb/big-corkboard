@@ -2,12 +2,9 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
-  type NoteColorKey,
-  NOTE_COLOR_KEYS,
   NOTE_COLOR_META,
   DEFAULT_NOTE_COLOR,
 } from "@/lib/noteColors";
-import type { NoteFormatting } from "@/components/NoteCard";
 import type { ClusterNoteItem } from "@/components/ClusterNode";
 import { useUndoContext } from "@/lib/UndoContext";
 
@@ -22,6 +19,8 @@ type ClusterPanelProps = {
   onUncluster: () => void;
   onReorderNotes: (reorderedNotes: ClusterNoteItem[]) => void;
   clearGhostRef?: React.MutableRefObject<() => void>;
+  selectedNoteId: string | null;
+  onSelectNote: (id: string | null) => void;
 };
 
 function PanelNoteCard({
@@ -145,8 +144,9 @@ export function ClusterPanel({
   onUncluster,
   onReorderNotes,
   clearGhostRef,
+  selectedNoteId,
+  onSelectNote,
 }: ClusterPanelProps) {
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { pushSnapshot } = useUndoContext();
 
@@ -218,24 +218,6 @@ export function ClusterPanel({
     handleReorderDragEnd();
   };
 
-  const selectedNote = notes.find((n) => n.id === selectedNoteId) ?? null;
-  const fmt = selectedNote?.formatting ?? {};
-  const colorKey = selectedNote?.colorKey ?? DEFAULT_NOTE_COLOR;
-
-  const toggleFmt = (key: keyof Omit<NoteFormatting, "fontSize">) => {
-    if (!selectedNote) return;
-    pushSnapshot();
-    onUpdateNote(selectedNote.id, {
-      formatting: { ...fmt, [key]: !fmt[key] },
-    });
-  };
-
-  const setColor = (key: NoteColorKey) => {
-    if (!selectedNote) return;
-    pushSnapshot();
-    onUpdateNote(selectedNote.id, { colorKey: key });
-  };
-
   const ghostPalette = NOTE_COLOR_META[ghostNote?.colorKey ?? DEFAULT_NOTE_COLOR];
 
   return (
@@ -287,39 +269,6 @@ export function ClusterPanel({
           </button>
         </div>
 
-        {/* Note formatting toolbar — active when a note is selected */}
-        <div className={`border-b border-black/8 px-3 py-2 transition-opacity dark:border-white/8 ${selectedNote ? "opacity-100" : "pointer-events-none opacity-30"}`}>
-          <div className="flex items-center gap-1">
-            {NOTE_COLOR_KEYS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                title={NOTE_COLOR_META[key].label}
-                onClick={() => setColor(key)}
-                className={`h-5 w-5 rounded transition-transform hover:scale-110 ${NOTE_COLOR_META[key].swatch} ${colorKey === key ? "ring-1 ring-black/30 ring-offset-1" : ""}`}
-              />
-            ))}
-            <div className="mx-1 h-4 w-px bg-black/10 dark:bg-white/10" />
-            {(
-              [
-                { key: "bold" as const, label: "B", cls: "font-bold" },
-                { key: "italic" as const, label: "I", cls: "italic" },
-                { key: "underline" as const, label: "U", cls: "underline" },
-              ]
-            ).map(({ key, label, cls }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => toggleFmt(key)}
-                aria-pressed={!!fmt[key]}
-                className={`flex h-6 w-6 items-center justify-center rounded text-xs transition-colors ${cls} ${fmt[key] ? "bg-black/10 text-black dark:bg-white/15 dark:text-white" : "text-black/40 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/8 dark:hover:text-white"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* Notes list — also the primary reorder drop zone */}
         <div
           className="flex-1 overflow-y-auto px-4 py-4"
@@ -350,7 +299,7 @@ export function ClusterPanel({
                     <PanelNoteCard
                       note={note}
                       selected={selectedNoteId === note.id}
-                      onSelect={() => setSelectedNoteId(note.id)}
+                      onSelect={() => onSelectNote(note.id)}
                       onUpdate={(update) => onUpdateNote(note.id, update)}
                       onDelete={() => onDeleteNote(note.id)}
                       onPushSnapshot={pushSnapshot}
