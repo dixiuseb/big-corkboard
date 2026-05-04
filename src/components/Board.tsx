@@ -19,7 +19,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import NoteCard, { type NoteFlowNode } from "@/components/NoteCard";
+import NoteCard, {
+  type NoteFlowNode,
+  type NoteFormatting,
+  type NoteFontSize,
+} from "@/components/NoteCard";
 import ClusterNode, {
   type ClusterFlowNode,
   type ClusterNoteItem,
@@ -27,7 +31,7 @@ import ClusterNode, {
 import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/BoardEdge";
 import { ClusterPanel } from "@/components/ClusterPanel";
 import { Toolbar } from "@/components/Toolbar";
-import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import { DEFAULT_NOTE_COLOR, type NoteColorKey } from "@/lib/noteColors";
 import { UndoContext } from "@/lib/UndoContext";
 import {
   loadBoardsMeta,
@@ -213,6 +217,12 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   // ── Connection mode ────────────────────────────────────────────────────────
   const [connecting, setConnecting] = useState(false);
   const toggleConnecting = useCallback(() => setConnecting((v) => !v), []);
+
+  // ── Default note settings (applied to new notes; updated when editing any note) ──
+  const [defaultSettings, setDefaultSettings] = useState<{
+    colorKey: NoteColorKey;
+    formatting: NoteFormatting;
+  }>({ colorKey: DEFAULT_NOTE_COLOR, formatting: {} });
 
   // nodeTypes must be stable across renders to avoid React Flow remounting nodes.
   const nodeTypes = useMemo(() => ({ noteCard: NoteCard, clusterNode: ClusterNode }), []);
@@ -423,6 +433,145 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       data: { ...n.data, notes: reorderedNotes },
     }));
   }, [expandedCluster, updateClusterNodes, pushSnapshot]);
+
+  // ── Panel note selection (lifted from ClusterPanel so the toolbar can see it) ──
+  const [selectedPanelNoteId, setSelectedPanelNoteId] = useState<string | null>(null);
+
+  // Reset panel selection when the open cluster changes.
+  useEffect(() => { setSelectedPanelNoteId(null); }, [expandedCluster?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Which canvas noteCard node is currently selected?
+  const selectedCanvasNote = useMemo(
+    () => nodes.find((n): n is NoteFlowNode => n.type === "noteCard" && !!n.selected) ?? null,
+    [nodes],
+  );
+
+  // Which panel note is currently selected?
+  const selectedPanelNote = useMemo(
+    () => expandedCluster?.data.notes.find((n) => n.id === selectedPanelNoteId) ?? null,
+    [expandedCluster, selectedPanelNoteId],
+  );
+
+  // Selecting a canvas note clears the panel selection, and vice versa.
+  useEffect(() => {
+    if (selectedCanvasNote) setSelectedPanelNoteId(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCanvasNote?.id]);
+
+  // Selecting a panel note deselects all canvas nodes.
+  const handleSelectPanelNote = useCallback((noteId: string | null) => {
+    setSelectedPanelNoteId(noteId);
+    if (noteId) {
+      setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+    }
+  }, [setNodes]);
+
+  // Settings shown in the toolbar — active note's, or the running default.
+  const toolbarColorKey: NoteColorKey =
+    selectedCanvasNote?.data.colorKey ?? selectedPanelNote?.colorKey ?? defaultSettings.colorKey;
+  const toolbarFormatting: NoteFormatting =
+    selectedCanvasNote?.data.formatting ?? selectedPanelNote?.formatting ?? defaultSettings.formatting;
+
+  // ── Toolbar note-formatting callbacks ─────────────────────────────────────
+  // Each callback applies the change to the active note (canvas or panel) and
+  // also updates defaultSettings so the next new note inherits the preference.
+
+  const handleToolbarColor = useCallback((key: NoteColorKey) => {
+    setDefaultSettings((s) => ({ ...s, colorKey: key }));
+    if (selectedCanvasNote) {
+      pushSnapshot();
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, colorKey: key } } : n,
+        ) as BoardNode[],
+      );
+    } else if (selectedPanelNote) {
+      pushSnapshot();
+      handleUpdateNote(selectedPanelNote.id, { colorKey: key });
+    }
+  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+
+  const handleToolbarFontSize = useCallback((size: NoteFontSize) => {
+    if (selectedCanvasNote) {
+      const newFmt = { ...(selectedCanvasNote.data.formatting ?? {}), fontSize: size };
+      pushSnapshot();
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, formatting: newFmt } } : n,
+        ) as BoardNode[],
+      );
+      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+    } else if (selectedPanelNote) {
+      const newFmt = { ...(selectedPanelNote.formatting ?? {}), fontSize: size };
+      pushSnapshot();
+      handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
+      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+    } else {
+      setDefaultSettings((s) => ({ ...s, formatting: { ...s.formatting, fontSize: size } }));
+    }
+  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+
+  const handleToolbarToggleFormat = useCallback((key: keyof Omit<NoteFormatting, "fontSize">) => {
+    if (selectedCanvasNote) {
+      const newFmt = { ...(selectedCanvasNote.data.formatting ?? {}), [key]: !selectedCanvasNote.data.formatting?.[key] };
+      pushSnapshot();
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, formatting: newFmt } } : n,
+        ) as BoardNode[],
+      );
+      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+    } else if (selectedPanelNote) {
+      const newFmt = { ...(selectedPanelNote.formatting ?? {}), [key]: !selectedPanelNote.formatting?.[key] };
+      pushSnapshot();
+      handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
+      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+    } else {
+      setDefaultSettings((s) => ({ ...s, formatting: { ...s.formatting, [key]: !s.formatting[key as keyof NoteFormatting] } }));
+    }
+  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+
+  const handleToolbarDelete = useCallback(() => {
+    if (selectedCanvasNote) {
+      pushSnapshot();
+      setNodes((nds) => nds.filter((n) => n.id !== selectedCanvasNote.id) as BoardNode[]);
+      setEdges((eds) =>
+        eds.filter(
+          (ed) => ed.source !== selectedCanvasNote.id && ed.target !== selectedCanvasNote.id,
+        ) as BoardEdgeType[],
+      );
+    } else if (selectedPanelNote) {
+      handleDeleteNote(selectedPanelNote.id);
+    }
+  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, setEdges, handleDeleteNote]);
+
+  const handleToolbarCreateCluster = useCallback(() => {
+    if (!selectedCanvasNote) return;
+    pushSnapshot();
+    const newCluster: ClusterFlowNode = {
+      id: crypto.randomUUID(),
+      type: "clusterNode",
+      position: { ...selectedCanvasNote.position },
+      data: {
+        notes: [{
+          id: crypto.randomUUID(),
+          body: selectedCanvasNote.data.body,
+          colorKey: selectedCanvasNote.data.colorKey ?? DEFAULT_NOTE_COLOR,
+          formatting: selectedCanvasNote.data.formatting,
+        }],
+        colorKey: selectedCanvasNote.data.colorKey ?? DEFAULT_NOTE_COLOR,
+      },
+    };
+    setNodes((nds) => [
+      ...nds.filter((n) => n.id !== selectedCanvasNote.id),
+      newCluster,
+    ]);
+    setEdges((eds) =>
+      eds.filter(
+        (ed) => ed.source !== selectedCanvasNote.id && ed.target !== selectedCanvasNote.id,
+      ) as BoardEdgeType[],
+    );
+  }, [selectedCanvasNote, pushSnapshot, setNodes, setEdges]);
 
   // ── Drag-to-pin handlers ──────────────────────────────────────────────────
 
@@ -671,6 +820,16 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             canUndo={canUndo}
             canRedo={canRedo}
             onClearBoard={handleClearBoard}
+            colorKey={toolbarColorKey}
+            formatting={toolbarFormatting}
+            onChangeColor={handleToolbarColor}
+            onChangeFontSize={handleToolbarFontSize}
+            onToggleFormat={handleToolbarToggleFormat}
+            canCreateCluster={!!selectedCanvasNote}
+            onCreateCluster={handleToolbarCreateCluster}
+            canDelete={!!(selectedCanvasNote ?? selectedPanelNote)}
+            onDeleteSelected={handleToolbarDelete}
+            defaultColorKey={defaultSettings.colorKey}
           />
           <Background gap={18} size={1} className="opacity-40" />
           <Controls />
@@ -691,6 +850,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             onUncluster={handleUncluster}
             onReorderNotes={handleReorderNotes}
             clearGhostRef={clearClusterGhostRef}
+            selectedNoteId={selectedPanelNoteId}
+            onSelectNote={handleSelectPanelNote}
           />
         )}
 

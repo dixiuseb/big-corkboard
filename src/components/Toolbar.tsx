@@ -2,8 +2,20 @@
 
 import { useCallback } from "react";
 import { Panel, useReactFlow } from "@xyflow/react";
-import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import {
+  type NoteColorKey,
+  NOTE_COLOR_KEYS,
+  NOTE_COLOR_META,
+} from "@/lib/noteColors";
+import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
+
+const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
+  { key: "sm", label: "S" },
+  { key: "md", label: "M" },
+  { key: "lg", label: "L" },
+  { key: "xl", label: "XL" },
+];
 
 type ToolbarProps = {
   connecting: boolean;
@@ -13,9 +25,39 @@ type ToolbarProps = {
   canUndo: boolean;
   canRedo: boolean;
   onClearBoard: () => void;
+  // Note formatting — reflects the selected note's settings, or the running default.
+  colorKey: NoteColorKey;
+  formatting: NoteFormatting;
+  defaultColorKey: NoteColorKey;
+  onChangeColor: (key: NoteColorKey) => void;
+  onChangeFontSize: (size: NoteFontSize) => void;
+  onToggleFormat: (key: keyof Omit<NoteFormatting, "fontSize">) => void;
+  // Contextual actions — enabled only when a note is selected.
+  canCreateCluster: boolean;
+  onCreateCluster: () => void;
+  canDelete: boolean;
+  onDeleteSelected: () => void;
 };
 
-export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUndo, canRedo, onClearBoard }: ToolbarProps) {
+export function Toolbar({
+  connecting,
+  onToggleConnecting,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onClearBoard,
+  colorKey,
+  formatting,
+  defaultColorKey,
+  onChangeColor,
+  onChangeFontSize,
+  onToggleFormat,
+  canCreateCluster,
+  onCreateCluster,
+  canDelete,
+  onDeleteSelected,
+}: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
 
@@ -34,9 +76,9 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
       id: crypto.randomUUID(),
       type: "noteCard",
       position: centrePosition(),
-      data: { body: "", colorKey: DEFAULT_NOTE_COLOR },
+      data: { body: "", colorKey, formatting },
     });
-  }, [addNodes, centrePosition, pushSnapshot]);
+  }, [addNodes, centrePosition, pushSnapshot, colorKey, formatting]);
 
   const addCluster = useCallback(() => {
     pushSnapshot();
@@ -45,15 +87,18 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
       type: "clusterNode",
       position: centrePosition(),
       data: {
-        notes: [{ id: crypto.randomUUID(), body: "", colorKey: DEFAULT_NOTE_COLOR }],
-        colorKey: DEFAULT_NOTE_COLOR,
+        notes: [{ id: crypto.randomUUID(), body: "", colorKey: defaultColorKey }],
+        colorKey: defaultColorKey,
       },
     });
-  }, [addNodes, centrePosition, pushSnapshot]);
+  }, [addNodes, centrePosition, pushSnapshot, defaultColorKey]);
+
+  const fontSize = formatting.fontSize ?? "md";
 
   return (
     <Panel position="top-center" className="m-2">
-      <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/90 px-3 py-2 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-neutral-800/90">
+      <div className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/90 px-3 py-2 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-neutral-800/90">
+
         {/* Undo / Redo */}
         <button
           type="button"
@@ -80,8 +125,9 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
           </svg>
         </button>
 
-        <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
+        {/* Add note / Add cluster */}
         <button
           type="button"
           onClick={addNote}
@@ -97,8 +143,96 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
           Add cluster
         </button>
 
-        <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
+        {/* Color swatches */}
+        {NOTE_COLOR_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            title={NOTE_COLOR_META[key].label}
+            onClick={() => onChangeColor(key)}
+            className={`h-5 w-5 flex-shrink-0 rounded-md ring-2 ring-offset-1 transition-transform hover:scale-110 dark:ring-offset-neutral-800 ${NOTE_COLOR_META[key].swatch} ${colorKey === key ? "ring-black/30 dark:ring-white/40" : "ring-transparent"}`}
+            aria-label={`Color: ${NOTE_COLOR_META[key].label}`}
+          />
+        ))}
+
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        {/* Font size */}
+        {FONT_SIZES.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            title={`Font size: ${label}`}
+            onClick={() => onChangeFontSize(key)}
+            aria-pressed={fontSize === key}
+            className={`flex h-7 min-w-[1.6rem] items-center justify-center rounded-md px-1 text-xs font-medium transition-colors ${fontSize === key ? "bg-black/10 text-black dark:bg-white/15 dark:text-white" : "text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"}`}
+          >
+            {label}
+          </button>
+        ))}
+
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        {/* Bold / Italic / Underline */}
+        {(
+          [
+            { key: "bold" as const, label: "B", title: "Bold", cls: "font-bold" },
+            { key: "italic" as const, label: "I", title: "Italic", cls: "italic" },
+            { key: "underline" as const, label: "U", title: "Underline", cls: "underline" },
+          ] as { key: keyof Omit<NoteFormatting, "fontSize">; label: string; title: string; cls: string }[]
+        ).map(({ key, label, title, cls }) => (
+          <button
+            key={key}
+            type="button"
+            title={title}
+            onClick={() => onToggleFormat(key)}
+            aria-pressed={!!formatting[key]}
+            className={`flex h-7 w-7 items-center justify-center rounded-md text-sm transition-colors ${cls} ${formatting[key] ? "bg-black/10 text-black dark:bg-white/15 dark:text-white" : "text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"}`}
+          >
+            {label}
+          </button>
+        ))}
+
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        {/* Create cluster (canvas note only) */}
+        <button
+          type="button"
+          title="Create cluster from selected note"
+          onClick={onCreateCluster}
+          disabled={!canCreateCluster}
+          className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="8" height="8" rx="1" />
+            <rect x="13" y="3" width="8" height="8" rx="1" />
+            <rect x="3" y="13" width="8" height="8" rx="1" />
+            <rect x="13" y="13" width="8" height="8" rx="1" />
+          </svg>
+          Cluster
+        </button>
+
+        {/* Delete selected note */}
+        <button
+          type="button"
+          title="Delete selected note"
+          onClick={onDeleteSelected}
+          disabled={!canDelete}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/40 hover:bg-red-50 hover:text-red-500 dark:text-white/30 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14H6L5 6" />
+            <path d="M10 11v6M14 11v6" />
+            <path d="M9 6V4h6v2" />
+          </svg>
+        </button>
+
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        {/* Connection mode */}
         <button
           type="button"
           onClick={onToggleConnecting}
@@ -121,8 +255,9 @@ export function Toolbar({ connecting, onToggleConnecting, onUndo, onRedo, canUnd
           Connect
         </button>
 
-        <div className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />
+        <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
+        {/* Clear board */}
         <button
           type="button"
           onClick={onClearBoard}
