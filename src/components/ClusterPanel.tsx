@@ -13,6 +13,7 @@ type ClusterPanelProps = {
   notes: ClusterNoteItem[];
   onUpdateNote: (noteId: string, update: Partial<ClusterNoteItem>) => void;
   onDeleteNote: (noteId: string) => void;
+  onEjectNote: (noteId: string) => void;
   onAddNote: () => void;
   onClose: () => void;
   onDeleteCluster: () => void;
@@ -28,7 +29,7 @@ function PanelNoteCard({
   selected,
   onSelect,
   onUpdate,
-  onDelete,
+  onEject,
   onPushSnapshot,
   onDragStartReorder,
   onDragEnterCard,
@@ -41,7 +42,7 @@ function PanelNoteCard({
   selected: boolean;
   onSelect: () => void;
   onUpdate: (update: Partial<ClusterNoteItem>) => void;
-  onDelete: () => void;
+  onEject: () => void;
   onPushSnapshot: () => void;
   onDragStartReorder: () => void;
   onDragEnterCard: () => void;
@@ -121,13 +122,14 @@ function PanelNoteCard({
       />
       <button
         type="button"
-        title="Remove note"
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-current/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
+        title="Eject note to canvas"
+        onClick={(e) => { e.stopPropagation(); onEject(); }}
+        className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-current/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-black/8 hover:text-current/70"
       >
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
+        {/* Arrow pointing left — visually communicates "send to canvas" */}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 12H5" />
+          <polyline points="12 19 5 12 12 5" />
         </svg>
       </button>
     </div>
@@ -138,6 +140,7 @@ export function ClusterPanel({
   notes,
   onUpdateNote,
   onDeleteNote,
+  onEjectNote,
   onAddNote,
   onClose,
   onDeleteCluster,
@@ -301,7 +304,7 @@ export function ClusterPanel({
                       selected={selectedNoteId === note.id}
                       onSelect={() => onSelectNote(note.id)}
                       onUpdate={(update) => onUpdateNote(note.id, update)}
-                      onDelete={() => onDeleteNote(note.id)}
+                      onEject={() => onEjectNote(note.id)}
                       onPushSnapshot={pushSnapshot}
                       onDragStartReorder={() => setReorderDragIndex(i)}
                       onDragEnterCard={() => setReorderOverIndex(i)}

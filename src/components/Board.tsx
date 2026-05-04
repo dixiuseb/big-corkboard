@@ -385,6 +385,38 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     [expandedCluster, setNodes, updateClusterNodes, pushSnapshot],
   );
 
+  const handleEjectNote = useCallback(
+    (noteId: string) => {
+      if (!expandedCluster) return;
+      const note = expandedCluster.data.notes.find((n) => n.id === noteId);
+      if (!note) return;
+      pushSnapshot();
+      const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
+      // Place the ejected note just to the left of the cluster so it's immediately visible.
+      const ejectPos = {
+        x: expandedCluster.position.x - 270,
+        y: expandedCluster.position.y,
+      };
+      const looseNote: NoteFlowNode = {
+        id: crypto.randomUUID(),
+        type: "noteCard",
+        position: ejectPos,
+        data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+      };
+      if (remaining.length === 0) {
+        // Cluster is now empty — remove it and place just the note.
+        setNodes((nds) => [...nds.filter((n) => n.id !== expandedCluster.id), looseNote]);
+      } else {
+        updateClusterNodes(expandedCluster.id, (n) => ({
+          ...n,
+          data: { ...n.data, notes: remaining },
+        }));
+        setNodes((nds) => [...nds, looseNote]);
+      }
+    },
+    [expandedCluster, setNodes, updateClusterNodes, pushSnapshot],
+  );
+
   const handleDeleteCluster = useCallback(() => {
     if (!expandedCluster) return;
     pushSnapshot();
@@ -844,6 +876,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             notes={expandedCluster.data.notes}
             onUpdateNote={handleUpdateNote}
             onDeleteNote={handleDeleteNote}
+            onEjectNote={handleEjectNote}
             onAddNote={handleAddNote}
             onClose={handleClosePanel}
             onDeleteCluster={handleDeleteCluster}
