@@ -79,6 +79,26 @@ function serializeEdges(edges: BoardEdgeType[]): object[] {
   }));
 }
 
+/** Point every edge that used oldId at newId; drop self-loops; merge duplicate endpoint pairs. */
+function remapEdgesReplaceNodeId(edges: BoardEdgeType[], oldId: string, newId: string): BoardEdgeType[] {
+  if (oldId === newId) return edges;
+  const remapped = edges.map((e) => ({
+    ...e,
+    source: e.source === oldId ? newId : e.source,
+    target: e.target === oldId ? newId : e.target,
+  }));
+  const noSelf = remapped.filter((e) => e.source !== e.target);
+  const seen = new Set<string>();
+  const out: BoardEdgeType[] = [];
+  for (const e of noSelf) {
+    const key = `${e.source}|${e.target}|${e.sourceHandle ?? ""}|${e.targetHandle ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
 // ── Viewport resetter (must live inside the ReactFlow provider) ───────────────
 function ViewportResetter({ signal }: { signal: number }) {
   const { setViewport } = useReactFlow();
@@ -437,7 +457,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     pushSnapshot();
     const { position, data } = expandedCluster;
     const looseNotes: NoteFlowNode[] = data.notes.map((note, i) => ({
-      id: crypto.randomUUID(),
+      id: i === 0 ? expandedCluster.id : crypto.randomUUID(),
       type: "noteCard" as const,
       position: { x: position.x + i * 30, y: position.y + i * 30 },
       data: {
@@ -593,30 +613,24 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const handleToolbarCreateCluster = useCallback(() => {
     if (!selectedCanvasNote) return;
     pushSnapshot();
+    const note = selectedCanvasNote;
+    // Keep the same node id so existing edges stay attached to this graph vertex.
     const newCluster: ClusterFlowNode = {
-      id: crypto.randomUUID(),
+      id: note.id,
       type: "clusterNode",
-      position: { ...selectedCanvasNote.position },
+      position: { ...note.position },
       data: {
         notes: [{
           id: crypto.randomUUID(),
-          body: selectedCanvasNote.data.body,
-          colorKey: selectedCanvasNote.data.colorKey ?? DEFAULT_NOTE_COLOR,
-          formatting: selectedCanvasNote.data.formatting,
+          body: note.data.body,
+          colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
+          formatting: note.data.formatting,
         }],
-        colorKey: selectedCanvasNote.data.colorKey ?? DEFAULT_NOTE_COLOR,
+        colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
       },
     };
-    setNodes((nds) => [
-      ...nds.filter((n) => n.id !== selectedCanvasNote.id),
-      newCluster,
-    ]);
-    setEdges((eds) =>
-      eds.filter(
-        (ed) => ed.source !== selectedCanvasNote.id && ed.target !== selectedCanvasNote.id,
-      ) as BoardEdgeType[],
-    );
-  }, [selectedCanvasNote, pushSnapshot, setNodes, setEdges]);
+    setNodes((nds) => nds.map((n) => (n.id === note.id ? newCluster : n)) as BoardNode[]);
+  }, [selectedCanvasNote, pushSnapshot, setNodes]);
 
   // ── Drag-to-pin handlers ──────────────────────────────────────────────────
 
@@ -710,10 +724,12 @@ function BoardCanvas({ boardId }: { boardId: string }) {
               : n,
           ),
       );
+      setEdges((eds) => remapEdgesReplaceNodeId(eds, draggedNode.id, targetId));
     } else if (targetNode.type === "noteCard") {
       const target = targetNode as NoteFlowNode;
+      // Reuse the target note's id for the new cluster so its edges stay valid; remap the dragged note's edges here.
       const newCluster: ClusterFlowNode = {
-        id: crypto.randomUUID(),
+        id: target.id,
         type: "clusterNode",
         position: { ...target.position },
         data: {
@@ -725,11 +741,12 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         },
       };
       setNodes((nds) => [
-        ...nds.filter((n) => n.id !== draggedNode.id && n.id !== targetId),
+        ...nds.filter((n) => n.id !== draggedNode.id && n.id !== target.id),
         newCluster,
       ]);
+      setEdges((eds) => remapEdgesReplaceNodeId(eds, draggedNode.id, target.id));
     }
-  }, [setNodes]);
+  }, [setNodes, setEdges]);
 
   // ── Drag-out from cluster panel ───────────────────────────────────────────
   // Notes dragged from ClusterPanel land on the canvas as loose noteCard nodes.
