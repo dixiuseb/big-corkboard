@@ -43,3 +43,8 @@ body {
 .react-flow__edges {
   z-index: 1000;
 }
+
+/* EdgeLabelRenderer portals here — must paint above the SVG edge layer */
+.react-flow__edgelabel-renderer {
+  z-index: 1002;
+}
