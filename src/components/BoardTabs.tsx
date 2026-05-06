@@ -76,8 +76,8 @@ export function BoardTabs({
 
   return (
     <div className="flex h-9 flex-shrink-0 items-stretch border-t border-black/10 bg-neutral-50 dark:border-white/10 dark:bg-neutral-950">
-      {/* Scrollable tab strip */}
-      <div className="flex min-w-0 flex-1 items-end overflow-x-auto">
+      {/* Tabs + add button in one row — add stays right after the last tab */}
+      <div className="flex min-w-0 flex-1 items-end gap-0 overflow-x-auto">
         {boards.map((board, i) => {
           const isActive = board.id === activeId;
           const isDragTarget = dragOverIndex === i && dragIndexRef.current !== i;
@@ -150,22 +150,21 @@ export function BoardTabs({
             </div>
           );
         })}
-      </div>
 
-      {/* Add-board button — hidden at the max cap */}
-      {boards.length < MAX_BOARDS && (
-        <button
-          type="button"
-          onClick={onAdd}
-          title="Add board"
-          className="flex w-9 flex-shrink-0 items-center justify-center text-stone-400 transition-colors hover:bg-black/5 hover:text-stone-600 dark:text-neutral-600 dark:hover:bg-white/5 dark:hover:text-neutral-400"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <line x1="7" y1="2" x2="7" y2="12" />
-            <line x1="2" y1="7" x2="12" y2="7" />
-          </svg>
-        </button>
-      )}
+        {boards.length < MAX_BOARDS && (
+          <button
+            type="button"
+            onClick={onAdd}
+            title="Add board"
+            className="flex h-8 flex-shrink-0 items-center justify-center rounded-t-md px-2 text-stone-400 transition-colors hover:bg-white/70 hover:text-stone-600 dark:text-neutral-600 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="7" y1="2" x2="7" y2="12" />
+              <line x1="2" y1="7" x2="12" y2="7" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

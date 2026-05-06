@@ -858,6 +858,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       >
         <ReactFlow
           className="h-full w-full touch-manipulation"
+          colorMode="system"
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
