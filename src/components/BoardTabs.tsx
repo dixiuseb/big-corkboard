@@ -77,7 +77,7 @@ export function BoardTabs({
   return (
     <div className="flex h-9 flex-shrink-0 items-stretch border-t border-black/10 bg-neutral-50 dark:border-white/10 dark:bg-neutral-950">
       {/* Tabs + add button in one row — add stays right after the last tab */}
-      <div className="flex min-w-0 flex-1 items-end gap-0 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-end gap-0 overflow-x-auto border-r border-black/5 dark:border-white/5">
         {boards.map((board, i) => {
           const isActive = board.id === activeId;
           const isDragTarget = dragOverIndex === i && dragIndexRef.current !== i;
@@ -164,6 +164,10 @@ export function BoardTabs({
             </svg>
           </button>
         )}
+      </div>
+
+      <div className="flex flex-shrink-0 items-center px-3 text-xs tabular-nums text-stone-400 dark:text-neutral-500">
+        © 2026 Ethan Dixius
       </div>
     </div>
   );
