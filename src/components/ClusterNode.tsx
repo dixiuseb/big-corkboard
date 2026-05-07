@@ -1,9 +1,10 @@
 "use client";
 
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 import type { NoteFormatting } from "@/components/NoteCard";
+import { useLayoutEffect, type CSSProperties } from "react";
 
 // A note stored inside a cluster (not a canvas node).
 export type ClusterNoteItem = {
@@ -30,6 +31,7 @@ const BACK_CARD_TRANSFORMS = [
 
 function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { setNodes } = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
   const notes = data.notes ?? [];
   // Cap the visible stack at 3 layers.
   const stackLayers = Math.min(notes.length, 3);
@@ -38,6 +40,12 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
   const frontPalette = NOTE_COLOR_META[frontColorKey];
   const isDropTarget = !!data.isDropTarget;
+
+  const handlePaint: CSSProperties = {
+    backgroundColor: frontPalette.handleColor,
+    borderColor: frontPalette.handleColor,
+    zIndex: 50,
+  };
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -54,18 +62,24 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   // Peek height: extra top space so back cards are visible above the front card.
   const peekPadding = stackLayers > 1 ? 12 : 0;
 
+  // React Flow caches handle positions on the node and only recomputes them when width/height
+  // change. Our handles sit on the inner front card, so we must force a remeasure when layout
+  // can shift without changing the outer node's offset dimensions (e.g. stack peek, preview text).
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [
+    id,
+    updateNodeInternals,
+    notes.length,
+    peekPadding,
+    stackLayers,
+    frontNote?.body,
+    selected,
+    isDropTarget,
+  ]);
+
   return (
     <>
-      {/* 8 handles: 4 sides + 4 corners */}
-      <Handle id="t"  type="source" position={Position.Top}                                              style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="b"  type="source" position={Position.Bottom}                                           style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="l"  type="source" position={Position.Left}                                             style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="r"  type="source" position={Position.Right}                                            style={{ backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0,      backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%", backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0,      backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-      <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%", backgroundColor: frontPalette.handleColor, borderColor: frontPalette.handleColor }} className="!h-2 !w-2 !rounded-full !border" />
-
       <div
         className="relative"
         style={{ width: 240, paddingTop: peekPadding }}
@@ -123,6 +137,16 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
               <span className="opacity-40 italic">Note...</span>
             )}
           </p>
+
+          {/* Handles pinned to the front card only (relative containing block); above stack layers */}
+          <Handle id="t"  type="source" position={Position.Top}    style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="b"  type="source" position={Position.Bottom} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="l"  type="source" position={Position.Left}  style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="r"  type="source" position={Position.Right} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="tl" type="source" position={Position.Top}    style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="tr" type="source" position={Position.Top}    style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="bl" type="source" position={Position.Bottom} style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="br" type="source" position={Position.Bottom} style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
         </div>
       </div>
 
