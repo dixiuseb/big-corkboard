@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback } from "react";
+import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Panel, useReactFlow } from "@xyflow/react";
 import {
   type NoteColorKey,
@@ -9,6 +10,121 @@ import {
 } from "@/lib/noteColors";
 import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
+
+function AboutMenu() {
+  const linkClass =
+    "text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400";
+
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    if (!open || !buttonRef.current) {
+      setPlacement(null);
+      return;
+    }
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPlacement({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    updatePlacement();
+  }, [updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => updatePlacement();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const menu =
+    open &&
+    placement &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        ref={menuRef}
+        role="menu"
+        style={{
+          position: "fixed",
+          top: placement.top,
+          right: placement.right,
+          zIndex: 10050,
+          width: "min(22rem, calc(100vw - 2rem))",
+        }}
+        className="rounded-lg border border-black/10 bg-white p-4 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+      >
+        <p className="font-semibold text-stone-900 dark:text-white">Big Corkboard</p>
+        <p className="mt-2 leading-relaxed text-stone-600 dark:text-neutral-300">
+          An infinite digital canvas for writers and creatives.
+        </p>
+        <p className="mt-3 leading-relaxed text-stone-600 dark:text-neutral-300">
+          Built by{" "}
+          <a
+            href="https://www.ethandixius.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkClass}
+          >
+            Ethan Dixius
+          </a>
+          {" · "}v1.0{" · "}
+          <a
+            href="https://github.com/dixiuseb/big-corkboard"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkClass}
+          >
+            GitHub
+          </a>
+        </p>
+      </div>,
+      document.body,
+    );
+
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+      >
+        About
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {menu}
+    </div>
+  );
+}
 
 const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "sm", label: "S" },
@@ -98,9 +214,11 @@ export function Toolbar({
   return (
     <Panel
       position="top-left"
-      className="!m-0 inset-x-0 w-full max-w-none border-b border-black/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
+      className="!m-0 inset-x-0 w-full max-w-none overflow-visible border-b border-black/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
     >
-      <div className="flex min-h-12 w-full min-w-0 flex-nowrap items-center gap-x-2 gap-y-1 overflow-x-auto px-4 py-2.5">
+      {/* Single min-h-12 + py-2.5 matches original toolbar height; avoid nesting another min-h-12 (adds extra vertical space). */}
+      <div className="flex min-h-12 w-full min-w-0 items-center gap-2 px-4 py-2.5">
+        <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-x-2 gap-y-1 overflow-x-auto">
 
         {/* Undo / Redo */}
         <button
@@ -269,6 +387,9 @@ export function Toolbar({
         >
           Clear
         </button>
+        </div>
+
+        <AboutMenu />
       </div>
     </Panel>
   );
