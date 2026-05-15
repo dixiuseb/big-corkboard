@@ -189,9 +189,18 @@ Each color can have a **user-defined label per board** (stored in `Board.colorLa
 - **Delete tab**: confirm; if that would leave zero boards, create a fresh **“Board 1”**.
 - **Clear board** is a toolbar action on the **active** board, not on the tab row.
 
-### Nested corkboards
+### Nested clusters (planned) vs nested corkboards (v3+)
 
-- **Not in v1.** Clusters are in-memory arrays of notes. Evolving to “cluster as sub-board” is a data-shape extension, not a full rewrite of v1.
+**v1:** Clusters hold a flat list of notes only — no clusters inside clusters.
+
+**Planned (target v2 unless reprioritized): one level of cluster nesting**
+
+- **Depth rule:** At most **one** level. A **root** cluster may contain **notes** and **child clusters**; a **child cluster must not** contain another cluster (only notes). Deeper trees belong under **nested corkboards / sub-boards (v3+)**, not arbitrary cluster recursion.
+- **Canvas — cluster onto cluster:** The **target** cluster is always the **parent** that stays on the canvas. On drop, show a **dialog**: **Flatten** (append every note from the dragged cluster to the **end** of the target as loose notes inside the target, then remove the dragged cluster node) **| Nest** (keep the dragged item as a **single child cluster** inside the target) **| Cancel** (abort; single **undo** step restores prior state). Edge rewiring and empty-cluster rules TBD in implementation.
+- **Panel:** Child clusters appear as an **indented sub-list** (folder-style hierarchy in the UI). Optional later: **in-panel DnD** like a file tree — e.g. dropping directly **under** a nested-cluster row assigns into that child cluster; **reject** drops that would exceed one level.
+- **“Make cluster”** in the panel: enable for a selected note only when the result is a **valid** child cluster (respect depth cap — e.g. not for a note that already sits inside a child cluster).
+
+**Nested corkboards (v3+):** A cluster or board region acts as a **sub-board** — different scope and data model than “one extra level of cluster.” See [ROADMAP.md](./ROADMAP.md) v3.
 
 ### Search & filtering (v2)
 
