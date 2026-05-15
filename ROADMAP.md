@@ -44,7 +44,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 Use this list for planning issues/PRs; reorder as priorities shift.
 
-- [ ] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
+- [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
 - [ ] **Filter by color** — From legend: dim non-matching notes/clusters; clear on `Escape` or second click.  
 - [ ] **Neon / vivid palette** — Second color set for notes; works with dark canvas; decision: global vs per-board toggle.  
 - [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  

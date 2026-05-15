@@ -2,15 +2,21 @@
 // Board list and canvas state are stored under separate keys so the tab list
 // can be loaded instantly without deserializing every board.
 
+import type { NoteColorKey } from "@/lib/noteColors";
+
 export const BOARDS_KEY = "corkboard:boards";
 export const boardKey = (id: string) => `corkboard:board:${id}`;
 
 export type BoardMeta = { id: string; title: string };
 
+/** User-defined category name per note color (v2 legend); omitted colors have no legend chip. */
+export type BoardColorLabels = Partial<Record<NoteColorKey, string>>;
+
 export type PersistedBoardState = {
   nodes: object[];
   edges: object[];
   viewport: { x: number; y: number; zoom: number };
+  colorLabels?: BoardColorLabels;
 };
 
 // ── Board list ────────────────────────────────────────────────────────────────

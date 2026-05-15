@@ -29,6 +29,10 @@ A digital cork board for planning writing projects: an infinite canvas where you
 - **Select** a note (one click) to change **color**, **size** (S / M / L / XL), and **bold / italic / underline** in the toolbar. Formatting applies to the **whole note**—there’s no rich-text selection inside a note.
 - **Delete** the selected note from the toolbar, or press **Delete** when a note is selected and you’re not typing in it.
 
+### Categories (legend)
+
+Above the board tabs, **Categories** lists **named colors** for this board only (e.g. “Characters” on amber). Use **+ Category** to pick an unused color and give it a name; click a chip to **rename** or **remove** the label. These names are saved with the board; **Undo** applies to label changes too. *(Dimming the canvas by color—filter—is a separate upcoming feature.)*
+
 ### Clusters
 
 A cluster is a **stack of cards** on the canvas that opens into a **side panel** of notes.
@@ -55,11 +59,11 @@ A cluster is a **stack of cards** on the canvas that opens into a **side panel**
 
 ### Undo & redo
 
-Use the toolbar arrows (and your OS undo/redo shortcuts) to step back and forward through recent work—moves, text, formatting, clusters, connections, and drag-out from clusters.
+Use the toolbar arrows (and your OS undo/redo shortcuts) to step back and forward through recent work—moves, text, formatting, **category labels**, clusters, connections, and drag-out from clusters.
 
 ### Clear this board
 
-**Clear** in the toolbar wipes **all notes and connections** on the **current** board after you confirm. It does **not** remove the tab itself.
+**Clear** in the toolbar wipes **all notes, connections, and category labels** on the **current** board after you confirm. It does **not** remove the tab itself.
 
 ### Where your data stays
 
