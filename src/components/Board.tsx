@@ -42,9 +42,11 @@ import {
   loadActiveBoard,
   saveActiveBoard,
   type BoardMeta,
+  type BoardColorLabels,
   type PersistedBoardState,
 } from "@/lib/persistence";
 import { BoardTabs } from "@/components/BoardTabs";
+import { ColorLegend } from "@/components/ColorLegend";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -52,7 +54,7 @@ type ContextMenu = { edgeId: string; x: number; y: number };
 
 const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
 
-type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[] };
+type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[]; colorLabels: BoardColorLabels };
 const MAX_HISTORY = 50;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -132,6 +134,14 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     (savedState?.edges ?? []) as BoardEdgeType[],
   );
 
+  const [colorLabels, setColorLabels] = useState<BoardColorLabels>(
+    () => savedState?.colorLabels ?? {},
+  );
+  const colorLabelsRef = useRef(colorLabels);
+  useEffect(() => {
+    colorLabelsRef.current = colorLabels;
+  }, [colorLabels]);
+
   const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
 
   // Tracks the latest viewport so it's included in auto-saves.
@@ -145,6 +155,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport: viewportRef.current,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, []);
 
@@ -155,10 +166,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         nodes: serializeNodes(nodes),
         edges: serializeEdges(edges),
         viewport: viewportRef.current,
+        colorLabels: { ...colorLabelsRef.current },
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [nodes, edges, boardId]);
+  }, [nodes, edges, colorLabels, boardId]);
 
   const onMoveEnd = useCallback((_: unknown, viewport: Viewport) => {
     viewportRef.current = viewport;
@@ -167,6 +179,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, [boardId]);
 
@@ -201,7 +214,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const [canRedo, setCanRedo] = useState(false);
 
   const pushSnapshot = useCallback(() => {
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     // Any new action clears the redo branch.
     redoStack.current = [];
@@ -212,24 +229,34 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const undo = useCallback(() => {
     if (undoStack.current.length === 0) return;
     // Save current live state so redo can return here.
-    redoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    redoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = undoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   const redo = useCallback(() => {
     if (redoStack.current.length === 0) return;
     // Save current live state so undo can return here.
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = redoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
   const prevDropTargetRef = useRef<string | null>(null);
@@ -835,30 +862,50 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (!window.confirm("Clear this board? All notes and connections will be removed.")) return;
     setNodes([]);
     setEdges([]);
+    setColorLabels({});
     undoStack.current = [];
     redoStack.current = [];
     setCanUndo(false);
     setCanRedo(false);
     setResetViewportSignal((s) => s + 1);
     viewportRef.current = DEFAULT_VIEWPORT;
-    saveBoardState(boardId, { nodes: [], edges: [], viewport: DEFAULT_VIEWPORT });
-  }, [boardId, setNodes, setEdges, setCanUndo, setCanRedo]);
+    saveBoardState(boardId, {
+      nodes: [],
+      edges: [],
+      viewport: DEFAULT_VIEWPORT,
+      colorLabels: {},
+    });
+  }, [boardId, setNodes, setEdges, setColorLabels, setCanUndo, setCanRedo]);
+
+  const handleColorLabelUpdate = useCallback(
+    (key: NoteColorKey, label: string | null) => {
+      pushSnapshot();
+      setColorLabels((prev) => {
+        const next = { ...prev };
+        if (label === null || label.trim() === "") delete next[key];
+        else next[key] = label.trim();
+        return next;
+      });
+    },
+    [pushSnapshot],
+  );
 
   const undoContextValue = useMemo(() => ({ pushSnapshot }), [pushSnapshot]);
 
   return (
     <UndoContext.Provider value={undoContextValue}>
       <div
-        className="h-full w-full bg-white dark:bg-neutral-900"
+        className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
         onClick={contextMenu ? closeContextMenu : undefined}
         onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
-        <ReactFlow
-          className="h-full w-full touch-manipulation"
-          colorMode="system"
+        <div className="relative min-h-0 flex-1">
+          <ReactFlow
+            className="h-full w-full touch-manipulation"
+            colorMode="system"
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -963,6 +1010,9 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             </button>
           </div>
         )}
+        </div>
+
+        <ColorLegend colorLabels={colorLabels} onUpdateLabel={handleColorLabelUpdate} />
       </div>
     </UndoContext.Provider>
   );

@@ -143,13 +143,15 @@ The app supports light and dark mode, but the two areas are handled independentl
 
 #### Color labels / legend (v2)
 
-Each color can have a **user-defined label per board** (stored in `Board.colorLabels`). The field exists from v1 so the legend UI needs no migration.
+Each color can have a **user-defined label per board** (persisted as `colorLabels` on the saved board JSON alongside `nodes` / `edges` / `viewport`).
 
-**Planned UI:**
+**Implemented UI** (`ColorLegend` above board tabs):
 
-- A **legend strip** along the bottom of the canvas (above board tabs): swatch + label for each named color; unlabeled colors omitted.
-- **“+ Assign category”** (or similar) opens an inline editor for any of the six colors.
-- Clicking a chip opens rename/clear.
+- Chips only for colors that have a **non-empty** label; each chip shows swatch + name; click opens rename popover (Save / Cancel / **Remove label**).
+- **+ Category** when any of the six colors is still unlabeled: choose color, then enter name (Save disabled until non-empty).
+- Label edits participate in **undo/redo** with the rest of the board; **Clear board** wipes labels too.
+
+**Still planned:** **Filter by color** from the legend (dim non-matching notes/clusters) — next roadmap item.
 
 **v3 extension:** a **“Filter by category”** view listing all notes (canvas + inside clusters) for one color — for very large boards.
 
