@@ -9,8 +9,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Project overview
 A digital corkboard for writing project planning. Infinite canvas with 
-standalone notecards and expandable cluster nodes. See README.md for 
-full spec and data model.
+standalone notecards and expandable cluster nodes. See **SPEC.md** for 
+data model and design decisions; **README.md** for end-user how-to; **ROADMAP.md** for shipped versions and upcoming work.
 
 ## Stack
 - Next.js (App Router) + React + TypeScript
@@ -41,8 +41,7 @@ full spec and data model.
 - `corkboard:board:{id}` — full canvas state per board
 
 ## Current roadmap position
-Steps 1–9 done. Currently on step 10 (look and feel improvements).
-See README.md for full roadmap.
+**v1** is complete and deployed ([bigcorkboard.com](https://bigcorkboard.com)). **v2** is in progress — see [ROADMAP.md](./ROADMAP.md) for scope and checklists.
 
 ## What to avoid
 - Do not use a rich text / contenteditable editor for note bodies
