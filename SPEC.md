@@ -149,7 +149,7 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 - **+ Category** when any of the eight colors is still unlabeled: choose color, then enter name (Save disabled until non-empty).
 - Label edits participate in **undo/redo** with the rest of the board; **Clear board** wipes labels too.
 
-- **Filter by color:** **click** a category chip to filter (whole chip is the control). **Right-click** or **long-press** the chip to rename. Matching notes stay full strength; others dim. **Clusters** count as matching if **any** inner note has that color; if the cluster has **no** notes yet, its canvas **color** (cluster tint) is used. **Edges** dim unless **both** endpoints match. An open cluster **panel** dims rows that don’t match. Clear with **Escape**, **Clear filter** at the **end of the legend row** (after **+ Category** when it is shown), or **click the same chip again**. **Removing that color’s category label** (rename popover: empty save or **Remove label**) **clears the filter** if it was that color.
+- **Filter by color:** **click** a category chip to filter (whole chip is the control). **Right-click** or **long-press** the chip to rename. Matching notes stay full strength; others dim. **Clusters** count as matching if **any** inner note has that color; if the cluster has **no** notes yet, its canvas **color** (cluster tint) is used. **Edges** dim unless **both** endpoints match. An open cluster **panel** dims rows that don’t match. Clear with **Escape**, **Clear filter** at the **end of the legend row** (after **+ Category** when it is shown), or **click the same chip again**. **Removing that color’s category label** (rename popover: empty save or **Remove label**) **clears the filter** if it was that color. **Search (v2):** while the floating search bar is open, an active color filter is **suspended** (legend chip appears deactivated); closing search **restores** the prior filter — see [Search (v2)](#search-v2).
 
 ##### Discussion (not committed)
 
@@ -204,13 +204,71 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 
 **Nested corkboards (v3+):** A cluster or board region acts as a **sub-board** — different scope and data model than “one extra level of cluster.” See [ROADMAP.md](./ROADMAP.md) v3.
 
-### Search & filtering (v2)
+### Search (v2)
 
-- `Cmd/Ctrl+F` (or equivalent) opens search UI tied to the **active board** only.
-- **Scope**: full text on all note bodies (canvas + inside clusters).
-- **Highlight**: matches emphasized; non-matches dimmed; canvas does not auto-pan to hits.
-- **Filter by color** (with legend): dim non-matching notes, clusters, edges, and panel rows; clear with `Escape`, **Clear filter** at the end of the legend row, or toggling the same chip again.
-- Cross-board search is **out of scope** for v2.
+`Cmd/Ctrl+F` (or equivalent) opens a **floating search bar** scoped to the **active board only**. Search is **full-text** across all **note bodies** — canvas notes and cluster-internal notes. **Cross-board search** is out of scope for v2.
+
+#### Entry / exit
+
+| Trigger | Effect |
+|--------|--------|
+| `Cmd/Ctrl+F` | Opens the search bar; focuses the input |
+| `Escape` or ✕ | Closes the bar; restores full canvas state (match dimming / highlights, color filter) |
+| Board tab switch | Closes the bar; clears all search state |
+
+#### Query behavior
+
+- Runs on every keystroke, **debounced ~150 ms**.
+- **Minimum 1 character** before match state applies; empty input clears all match state.
+- **Case-insensitive**.
+- **Scope:** note **body** text only (canvas + cluster-internal).
+
+#### Match state
+
+| Element | Matching | Non-matching |
+|--------|----------|----------------|
+| Canvas notes | Full opacity + subtle **highlight ring** (tinted to the **card’s color**, not a generic yellow) | **Dimmed** |
+| Cluster nodes | Full opacity + highlight ring if **≥ 1** internal note matches | **Dimmed** |
+| Edges | **Unaffected** | — |
+
+- **Dimming:** non-matches should read like the **category filter** “non-selected” treatment (same ballpark visually); no fixed opacity percentage in the spec.
+
+- **Match count** in the bar: **“N matches”**, where **N** = number of matching **notes** (canvas + cluster-internal **counted individually**). One note whose body matches the query in multiple places still counts as **1** match. Two notes in the same cluster that both match = **2** matches.
+- **Zero matches:** show **“No matches”**; **do not** dim the canvas.
+
+#### Cycling
+
+- **Forward:** `Enter`, `↓`, or **next** control in the bar.
+- **Backward:** `Shift+Enter`, `↑`, or **previous** control in the bar.
+- Counter: **“2 / 4 matches”** (current index / total). **Wraps** (last → first, first → last).
+
+**Active match**
+
+- Stronger than passive matches (e.g. stronger ring, slight scale or shadow) so the **current** hit is obvious.
+- **Pan:** smoothly center the active match in the viewport. If it is **already fully visible**, **do not** pan.
+- **Zoom:** if the active match is in view but **too small to read** at the current zoom, **zoom in** to a readable level **before** panning. **Do not** zoom out solely because the match is off-canvas.
+
+**Cluster-internal matches**
+
+- Each matching cluster-internal note is its own **cycle stop** and counts toward **N**.
+- When the cycle lands on a cluster-internal match:
+  - Open the **cluster panel** if it is not already open.
+  - **Select / highlight** that note in the panel.
+  - **Pan** the canvas to the **cluster node**.
+- **Passive** matches inside a cluster (not the active stop): the cluster node stays at full opacity with passive match styling; the panel **does not** auto-open.
+- Two notes in the **same** cluster that both match → **two** stops; the panel stays open when moving between them.
+
+#### Interaction with color filter
+
+- Opening search **suspends** any active color filter for the **search session**.
+- The **category legend** reflects this: the active filter chip appears **deactivated / greyed** while search is open.
+- Closing search (`Escape`, ✕, or board switch) **restores** the previously active color filter if one was set.
+
+#### UI placement
+
+- Bar floats **top-center**, **below** the main toolbar and **above** the canvas.
+- Contents: text input, match counter (**“2 / 4 matches”** or **“No matches”**), prev/next controls, ✕ close.
+- **Non-modal** — user can still pan and interact with the canvas while search is open.
 
 ### Export (v2)
 

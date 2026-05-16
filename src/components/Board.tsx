@@ -48,6 +48,10 @@ import {
 import { BoardTabs } from "@/components/BoardTabs";
 import { ColorLegend } from "@/components/ColorLegend";
 import { CategoryFilterContext } from "@/lib/CategoryFilterContext";
+import { SearchContext, buildSearchSessionValue } from "@/lib/SearchContext";
+import { buildSearchMatches } from "@/lib/searchMatches";
+import { BoardSearchBar } from "@/components/BoardSearchBar";
+import { SearchMatchViewport } from "@/components/SearchMatchViewport";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -148,6 +152,32 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const toggleCategoryFilter = useCallback((key: NoteColorKey) => {
     setCategoryFilterColor((prev) => (prev === key ? null : key));
   }, []);
+
+  // ── Search (Cmd/Ctrl+F) ───────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      setDebouncedSearchQuery("");
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchInput.trim().toLowerCase());
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [searchInput, searchOpen]);
+
+  useEffect(() => {
+    setSearchActiveIndex(0);
+  }, [debouncedSearchQuery]);
+
+  const searchMatches = useMemo(
+    () => buildSearchMatches(nodes, debouncedSearchQuery),
+    [nodes, debouncedSearchQuery],
+  );
 
   const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
 
@@ -323,6 +353,38 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     closeContextMenu();
   }, [setEdges, closeContextMenu, pushSnapshot]);
 
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchInput("");
+    setDebouncedSearchQuery("");
+    setSearchActiveIndex(0);
+    setConnecting(false);
+    setContextMenu(null);
+  }, [setConnecting, setContextMenu]);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+  }, []);
+
+  const goSearchNext = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i + 1) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const goSearchPrev = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i - 1 + searchMatches.length) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const searchSessionValue = useMemo(
+    () => buildSearchSessionValue(searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex),
+    [searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex],
+  );
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -339,7 +401,17 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         return;
       }
 
+      if (isCmd && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+
       if (e.key === "Escape") {
+        if (searchOpen) {
+          closeSearch();
+          return;
+        }
         setConnecting(false);
         setContextMenu(null);
         setCategoryFilterColor(null);
@@ -379,7 +451,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undo, redo, pushSnapshot, setNodes, setEdges]);
+  }, [undo, redo, pushSnapshot, setNodes, setEdges, searchOpen, closeSearch]);
 
   // ── Cluster panel state ────────────────────────────────────────────────────
   const expandedCluster = useMemo(
@@ -564,6 +636,29 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (noteId) {
       setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
     }
+  }, [setNodes]);
+
+  const onSearchClusterInternalActive = useCallback((clusterId: string, noteId: string) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "clusterNode") return n;
+        const expanded = n.id === clusterId;
+        return n.data.expanded === expanded ? n : { ...n, data: { ...n.data, expanded } };
+      }),
+    );
+    setSelectedPanelNoteId(noteId);
+  }, [setNodes]);
+
+  const onSearchCollapseClusters = useCallback(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type === "clusterNode" && n.data.expanded) {
+          return { ...n, data: { ...n.data, expanded: false } };
+        }
+        return n;
+      }),
+    );
+    setSelectedPanelNoteId(null);
   }, [setNodes]);
 
   // Settings shown in the toolbar — active note's, or the running default.
@@ -884,7 +979,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       viewport: DEFAULT_VIEWPORT,
       colorLabels: {},
     });
-  }, [boardId, setNodes, setEdges, setColorLabels, setCanUndo, setCanRedo]);
+    closeSearch();
+  }, [boardId, setNodes, setEdges, setColorLabels, setCanUndo, setCanRedo, closeSearch]);
 
   const handleColorLabelUpdate = useCallback(
     (key: NoteColorKey, label: string | null) => {
@@ -907,7 +1003,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
 
   return (
     <UndoContext.Provider value={undoContextValue}>
-      <CategoryFilterContext.Provider value={categoryFilterColor}>
+      <SearchContext.Provider value={searchSessionValue}>
+      <CategoryFilterContext.Provider value={searchOpen ? null : categoryFilterColor}>
       <div
         className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
@@ -947,6 +1044,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
+            searchOpen={searchOpen}
+            onOpenSearch={openSearch}
             onClearBoard={handleClearBoard}
             colorKey={toolbarColorKey}
             formatting={toolbarFormatting}
@@ -963,6 +1062,25 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           <Controls />
           <ViewportResetter signal={resetViewportSignal} />
           <SFPCapture sfpRef={sfpRef} />
+          <BoardSearchBar
+            open={searchOpen}
+            inputValue={searchInput}
+            onInputChange={setSearchInput}
+            onClose={closeSearch}
+            matchesLength={searchMatches.length}
+            activeIndex={searchActiveIndex}
+            onNext={goSearchNext}
+            onPrev={goSearchPrev}
+            debouncedQuery={debouncedSearchQuery}
+          />
+          <SearchMatchViewport
+            open={searchOpen}
+            debouncedQuery={debouncedSearchQuery}
+            matches={searchMatches}
+            activeIndex={searchActiveIndex}
+            onClusterInternalActive={onSearchClusterInternalActive}
+            onCollapseClusters={onSearchCollapseClusters}
+          />
         </ReactFlow>
 
         {/* Cluster side panel */}
@@ -1031,9 +1149,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           onUpdateLabel={handleColorLabelUpdate}
           filterColor={categoryFilterColor}
           onToggleFilter={toggleCategoryFilter}
+          filterSuspended={searchOpen && categoryFilterColor != null}
         />
       </div>
       </CategoryFilterContext.Provider>
+      </SearchContext.Provider>
     </UndoContext.Provider>
   );
 }

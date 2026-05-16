@@ -35,7 +35,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 |------|--------|
 | **Categories** | Per-board color labels + legend UI; **filter by color** on the canvas (dim non-matches). |
 | **Palette** | **Eight** unified, high-contrast note colors with **light/dark** surfaces (no separate user “theme” pick); see `noteColors.ts`. |
-| **Search** | `Cmd/Ctrl+F` (or equivalent) on the **active board** only; highlight matches; no cross-board search in v2. |
+| **Search** | `Cmd/Ctrl+F` on the **active board** only: floating bar, cycling, pan/zoom-to-readable for the active hit, cluster panel integration, color-filter suspend while open. No cross-board search in v2. See [SPEC.md](./SPEC.md#search-v2). |
 | **Export** | PNG (current view + fit-all) and JSON backup/import for the current board. |
 | **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel shows children as **indented** rows; optional panel tree-DnD later. Deeper hierarchy → **nested corkboards (v3)**. |
 | **Polish** | Small UX wins that don’t warrant their own row — track as individual GitHub issues. |
@@ -47,7 +47,7 @@ Use this list for planning issues/PRs; reorder as priorities shift.
 - [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
 - [x] **Filter by color** — Legend swatch: dim non-matching notes, clusters, edges, and cluster-panel rows; clear on `Escape`, **Clear filter**, or second click on the active swatch.  
 - [x] **Note palette** — Eight theme-aware colors (light + dark card surfaces, label-tint handles/rings); legacy six-color keys migrate on load.  
-- [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  
+- [ ] **Search** — [SPEC.md — Search (v2)](./SPEC.md#search-v2): floating top-center bar (non-modal), debounced query, match rings + dim non-matches, cycle with wrap, smart pan/zoom for active match, cluster-internal stops + panel, color filter suspended while open.
 - [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; filename from board title.  
 - [ ] **Export / import JSON** — Download board state; file pick or drop to restore (define conflict behavior: replace board vs merge TBD).  
 - [ ] **Multi-select & bulk actions** — Not polish: new interaction model + toolbar/cluster behavior. Tie to your GitHub issues as you open/close them.  

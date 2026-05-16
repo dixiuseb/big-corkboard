@@ -6,6 +6,7 @@ import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/no
 import type { NoteFormatting } from "@/components/NoteCard";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { clusterNotesMatchFilter } from "@/lib/categoryFilterMatch";
+import { useSearchSession } from "@/lib/SearchContext";
 import { useLayoutEffect } from "react";
 
 // A note stored inside a cluster (not a canvas node).
@@ -35,6 +36,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { setNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const categoryFilter = useCategoryFilter();
+  const search = useSearchSession();
   const notes = data.notes ?? [];
   // Cap the visible stack at 3 layers.
   const stackLayers = Math.min(notes.length, 3);
@@ -46,6 +48,26 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const filterDimmed =
     categoryFilter !== null &&
     !clusterNotesMatchFilter(notes, data.colorKey, categoryFilter);
+  const searchDimmed =
+    search.dimNonMatches && !search.clusterHasPassiveOrActiveMatch(id);
+  const outerDimmed = filterDimmed || searchDimmed;
+
+  const activeMatch =
+    search.matches.length > 0 ? search.matches[search.activeIndex] : undefined;
+  const activeClusterSearch =
+    search.dimNonMatches &&
+    activeMatch?.kind === "cluster" &&
+    activeMatch.clusterId === id;
+  const passiveClusterSearch =
+    search.dimNonMatches &&
+    search.clusterHasPassiveOrActiveMatch(id) &&
+    !activeClusterSearch;
+
+  let frontRing = "ring-transparent";
+  if (isDropTarget) frontRing = `${frontPalette.selectedRing} shadow-lg scale-[1.03]`;
+  else if (activeClusterSearch) frontRing = `${frontPalette.selectedRing} z-[1] shadow-lg scale-[1.02]`;
+  else if (selected) frontRing = `${frontPalette.selectedRing} shadow-lg`;
+  else if (passiveClusterSearch) frontRing = `${frontPalette.selectedRing}`;
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -81,7 +103,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   return (
     <>
       <div
-        className={`relative transition-opacity ${filterDimmed ? "opacity-[0.38]" : ""}`}
+        className={`relative transition-opacity ${outerDimmed ? "opacity-[0.38]" : ""}`}
         style={{ width: 240, paddingTop: peekPadding }}
       >
         {/* Back cards — one per stack layer behind the front; each uses that note's color. */}
@@ -107,7 +129,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
         {/* Front card */}
         <div
-          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 ring-offset-white transition-all dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${isDropTarget ? `${frontPalette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${frontPalette.selectedRing} shadow-lg` : "ring-transparent"}`}
+          className={`relative rounded-lg border shadow-md ${activeClusterSearch ? "ring-4" : "ring-2"} ring-offset-2 ring-offset-white transition-all dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${frontRing}`}
           style={{ zIndex: stackLayers }}
         >
           {/* Header row: note count + expand button */}
