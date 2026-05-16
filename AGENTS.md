@@ -28,13 +28,9 @@ data model and design decisions; **README.md** for end-user how-to; **ROADMAP.md
 - Handles appear on hover only, styled as a darker shade of the node's 
   own color — never default black React Flow handles
 
-## Color palette (pastel backgrounds, stone-800 text)
-- amber: #FAEEDA
-- sky:   #E6F1FB
-- teal:  #E1F5EE
-- rose:  #FBEAF0
-- violet:#F0EAFB
-- lime:  #EDF9E1
+## Color palette (eight theme-aware note colors)
+
+See `src/lib/noteColors.ts` for keys, hex values, and migration from the old six-color set. Handles use each note’s label tint — not generic black React Flow dots.
 
 ## Persistence keys
 - `corkboard:boards` — ordered array of { id, title }

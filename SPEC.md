@@ -17,7 +17,7 @@ One infinite canvas: **standalone notecards** and **expandable cluster-nodes** c
 ## Data model
 
 ```ts
-type Color = 'amber' | 'sky' | 'teal' | 'rose' | 'violet' | 'lime'
+type Color = 'iris' | 'sky' | 'spearmint' | 'fern' | 'marigold' | 'terracotta' | 'rose' | 'stone'
 
 // Formatting applies to the entire note body — no inline / rich-text ranges.
 // This keeps the data model simple and avoids a contenteditable editor.
@@ -63,7 +63,7 @@ type Board = {
   nodes: (NoteCard | ClusterNode)[]
   edges: BoardEdge[]
   viewport: { x: number; y: number; zoom: number }
-  // User-defined label per color (e.g. amber → "Characters", sky → "Scenes").
+  // User-defined label per color (e.g. iris → "Characters", sky → "Scenes").
   // Omitted colors have no label. UI reads this to render the bottom legend.
   colorLabels?: Partial<Record<Color, string>>
 }
@@ -119,26 +119,24 @@ This way the tab list can be loaded instantly without deserializing every board�
 
 ### Color system
 
-- **Soft pastel palette** — light backgrounds with legible `text-stone-800` text. Six colors: amber, sky, teal, rose, violet, lime.
+- **Eight theme-aware note colors** — each key has a **light-mode** surface (brighter bg, dark body text) and a **dark-mode** surface (deeper bg, light body text), driven by `prefers-color-scheme` / Tailwind `dark:`. Handles and selection rings use a stronger **label** tint per color (see `src/lib/noteColors.ts`).
 - **Semantic use** (e.g. characters vs scenes vs themes) makes the board scannable at a glance.
 - Notes inside a cluster can be mixed colors; the panel shows each card’s own color.
 
 #### Light and dark mode
 
-The app supports light and dark mode, but the two areas are handled independently:
+**Note card colors — theme-adaptive**
 
-**Note card colors — theme-agnostic (v1)**
+- Card background, border, body text, handles, and selection ring all switch with system light/dark so notes stay legible on the cork surface in both themes.
 
-- Note card backgrounds, borders, and text use the **pastel palette** regardless of system theme.
-- Placeholder text inside notes stays **dark** (`text-stone-500` or similar) — not a `dark:` variant — because the note surface stays light; a `dark:` variant would be illegible in OS dark mode.
-
-**Chrome (board + UI) — theme-adaptive (v1)**
+**Chrome (board + UI) — theme-adaptive**
 
 - Canvas background, toolbar, panel backgrounds, and chrome buttons follow the theme.
 
+**Legacy boards:** persisted `colorKey` / `colorLabels` from the old six-color set (`amber`, `teal`, `violet`, `lime`, …) are remapped on load (see `normalizeNoteColorKey` in `noteColors.ts`).
+
 **Future palette expansions**
 
-- **v2**: a second set of **neon/vivid note colors** for dark canvases; optional switch (e.g. per board) TBD.
 - **v3**: **user-defined colors and themes** — custom hex per note, custom board backgrounds, full palette control.
 
 #### Color labels / legend (v2)
@@ -148,7 +146,7 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 **Implemented UI** (`ColorLegend` above board tabs):
 
 - Chips only for colors that have a **non-empty** label; each chip shows swatch + name. **Click** the chip to **toggle the color filter** (same chip again clears). **Right-click** or **long-press** (~0.5s) opens **rename** (Save / Cancel / **Remove label**).
-- **+ Category** when any of the six colors is still unlabeled: choose color, then enter name (Save disabled until non-empty).
+- **+ Category** when any of the eight colors is still unlabeled: choose color, then enter name (Save disabled until non-empty).
 - Label edits participate in **undo/redo** with the rest of the board; **Clear board** wipes labels too.
 
 - **Filter by color:** **click** a category chip to filter (whole chip is the control). **Right-click** or **long-press** the chip to rename. Matching notes stay full strength; others dim. **Clusters** count as matching if **any** inner note has that color; if the cluster has **no** notes yet, its canvas **color** (cluster tint) is used. **Edges** dim unless **both** endpoints match. An open cluster **panel** dims rows that don’t match. Clear with **Escape**, **Clear filter** at the **end of the legend row** (after **+ Category** when it is shown), or **click the same chip again**. **Removing that color’s category label** (rename popover: empty save or **Remove label**) **clears the filter** if it was that color.

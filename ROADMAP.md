@@ -34,7 +34,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 | Area | Intent |
 |------|--------|
 | **Categories** | Per-board color labels + legend UI; **filter by color** on the canvas (dim non-matches). |
-| **Palette** | Second note color set (e.g. neon) tuned for dark canvas; user or per-board choice TBD. |
+| **Palette** | **Eight** unified, high-contrast note colors with **light/dark** surfaces (no separate user “theme” pick); see `noteColors.ts`. |
 | **Search** | `Cmd/Ctrl+F` (or equivalent) on the **active board** only; highlight matches; no cross-board search in v2. |
 | **Export** | PNG (current view + fit-all) and JSON backup/import for the current board. |
 | **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel shows children as **indented** rows; optional panel tree-DnD later. Deeper hierarchy → **nested corkboards (v3)**. |
@@ -46,7 +46,7 @@ Use this list for planning issues/PRs; reorder as priorities shift.
 
 - [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
 - [x] **Filter by color** — Legend swatch: dim non-matching notes, clusters, edges, and cluster-panel rows; clear on `Escape`, **Clear filter**, or second click on the active swatch.  
-- [ ] **Neon / vivid palette** — Second color set for notes; works with dark canvas; decision: global vs per-board toggle.  
+- [x] **Note palette** — Eight theme-aware colors (light + dark card surfaces, label-tint handles/rings); legacy six-color keys migrate on load.  
 - [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  
 - [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; filename from board title.  
 - [ ] **Export / import JSON** — Download board state; file pick or drop to restore (define conflict behavior: replace board vs merge TBD).  

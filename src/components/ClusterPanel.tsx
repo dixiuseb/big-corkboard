@@ -73,7 +73,7 @@ function PanelNoteCard({
     <div
       onClick={onSelect}
       onDragEnter={onDragEnterCard}
-      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-[opacity,box-shadow] ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ${palette.selectedRing}` : "ring-0"} ${filterDimmed ? "opacity-[0.38]" : ""}`}
+      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-[opacity,box-shadow] ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 ${palette.selectedRing}` : "ring-0"} ${filterDimmed ? "opacity-[0.38]" : ""}`}
     >
       {/* Drag handle — drag within panel to reorder; drag onto canvas to pull out. */}
       <div
@@ -122,7 +122,7 @@ function PanelNoteCard({
         onWheel={(e) => e.stopPropagation()}
         placeholder="Note…"
         rows={3}
-        className={`w-full resize-y bg-transparent px-3 py-2 text-sm outline-none placeholder:text-stone-400 ${fmtClasses}`}
+        className={`w-full resize-y bg-transparent px-3 py-2 text-sm outline-none placeholder:text-current/45 ${fmtClasses}`}
         spellCheck
       />
       <button
