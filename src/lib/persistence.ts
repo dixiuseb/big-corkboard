@@ -2,7 +2,7 @@
 // Board list and canvas state are stored under separate keys so the tab list
 // can be loaded instantly without deserializing every board.
 
-import type { NoteColorKey } from "@/lib/noteColors";
+import { normalizeNoteColorKey, type NoteColorKey } from "@/lib/noteColors";
 
 export const BOARDS_KEY = "corkboard:boards";
 export const boardKey = (id: string) => `corkboard:board:${id}`;
@@ -41,11 +41,46 @@ export function saveBoardsMeta(boards: BoardMeta[]): void {
 
 // ── Board state ───────────────────────────────────────────────────────────────
 
+function migrateNodes(nodes: object[]): object[] {
+  return nodes.map((n) => {
+    if (!n || typeof n !== "object") return n;
+    const node = n as Record<string, unknown>;
+    const data = node.data;
+    if (!data || typeof data !== "object") return n;
+    const d = { ...(data as Record<string, unknown>) };
+    if ("colorKey" in d) d.colorKey = normalizeNoteColorKey(d.colorKey);
+    const rawNotes = d.notes;
+    if (Array.isArray(rawNotes)) {
+      d.notes = rawNotes.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const it = item as Record<string, unknown>;
+        return { ...it, colorKey: normalizeNoteColorKey(it.colorKey) };
+      });
+    }
+    return { ...node, data: d };
+  });
+}
+
+function migrateColorLabels(raw: unknown): BoardColorLabels | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const next: BoardColorLabels = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const nk = normalizeNoteColorKey(k);
+    if (typeof v === "string" && v.trim()) next[nk] = v.trim();
+  }
+  return next;
+}
+
 export function loadBoardState(id: string): PersistedBoardState | null {
   try {
     const raw = localStorage.getItem(boardKey(id));
     if (!raw) return null;
-    return JSON.parse(raw) as PersistedBoardState;
+    const parsed = JSON.parse(raw) as PersistedBoardState;
+    return {
+      ...parsed,
+      nodes: migrateNodes(parsed.nodes ?? []),
+      colorLabels: migrateColorLabels(parsed.colorLabels) ?? parsed.colorLabels,
+    };
   } catch {
     return null;
   }

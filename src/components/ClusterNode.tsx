@@ -6,7 +6,7 @@ import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/no
 import type { NoteFormatting } from "@/components/NoteCard";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { clusterNotesMatchFilter } from "@/lib/categoryFilterMatch";
-import { useLayoutEffect, type CSSProperties } from "react";
+import { useLayoutEffect } from "react";
 
 // A note stored inside a cluster (not a canvas node).
 export type ClusterNoteItem = {
@@ -46,12 +46,6 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const filterDimmed =
     categoryFilter !== null &&
     !clusterNotesMatchFilter(notes, data.colorKey, categoryFilter);
-
-  const handlePaint: CSSProperties = {
-    backgroundColor: frontPalette.handleColor,
-    borderColor: frontPalette.handleColor,
-    zIndex: 50,
-  };
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -106,14 +100,14 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
                 transform: BACK_CARD_TRANSFORMS[i],
                 zIndex: i,
               }}
-              className={`rounded-lg border ${backPalette.cardClass}`}
+              className={`rounded-lg ${backPalette.cardClass}`}
             />
           );
         })}
 
         {/* Front card */}
         <div
-          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 transition-all ${frontPalette.cardClass} ${isDropTarget ? `${frontPalette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${frontPalette.selectedRing} shadow-lg` : "ring-transparent"}`}
+          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 ring-offset-white transition-all dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${isDropTarget ? `${frontPalette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${frontPalette.selectedRing} shadow-lg` : "ring-transparent"}`}
           style={{ zIndex: stackLayers }}
         >
           {/* Header row: note count + expand button */}
@@ -145,14 +139,14 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
           </p>
 
           {/* Handles pinned to the front card only (relative containing block); above stack layers */}
-          <Handle id="t"  type="source" position={Position.Top}    style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="b"  type="source" position={Position.Bottom} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="l"  type="source" position={Position.Left}  style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="r"  type="source" position={Position.Right} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="tl" type="source" position={Position.Top}    style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="tr" type="source" position={Position.Top}    style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="bl" type="source" position={Position.Bottom} style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="br" type="source" position={Position.Bottom} style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="t"  type="source" position={Position.Top}    className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="b"  type="source" position={Position.Bottom} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="l"  type="source" position={Position.Left}  className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="r"  type="source" position={Position.Right} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0 }}      className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%" }} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0 }}      className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%" }} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
         </div>
       </div>
 
