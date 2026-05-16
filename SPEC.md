@@ -147,13 +147,15 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 
 **Implemented UI** (`ColorLegend` above board tabs):
 
-- Chips only for colors that have a **non-empty** label; each chip shows swatch + name; click opens rename popover (Save / Cancel / **Remove label**).
+- Chips only for colors that have a **non-empty** label; each chip shows swatch + name. **Click** the chip to **toggle the color filter** (same chip again clears). **Right-click** or **long-press** (~0.5s) opens **rename** (Save / Cancel / **Remove label**).
 - **+ Category** when any of the six colors is still unlabeled: choose color, then enter name (Save disabled until non-empty).
 - Label edits participate in **undo/redo** with the rest of the board; **Clear board** wipes labels too.
 
-**Still planned:** **Filter by color** from the legend (dim non-matching notes/clusters) — next roadmap item.
+- **Filter by color:** **click** a category chip to filter (whole chip is the control). **Right-click** or **long-press** the chip to rename. Matching notes stay full strength; others dim. **Clusters** count as matching if **any** inner note has that color; if the cluster has **no** notes yet, its canvas **color** (cluster tint) is used. **Edges** dim unless **both** endpoints match. An open cluster **panel** dims rows that don’t match. Clear with **Escape**, **Clear filter** at the **end of the legend row** (after **+ Category** when it is shown), or **click the same chip again**. **Removing that color’s category label** (rename popover: empty save or **Remove label**) **clears the filter** if it was that color.
 
-**v3 extension:** a **“Filter by category”** view listing all notes (canvas + inside clusters) for one color — for very large boards.
+##### Discussion (not committed)
+
+- **List view:** optionally combine filtering with a side list of every canvas node and cluster-internal note in the active color—useful on very large boards. Uncertain product fit; not implemented.
 
 ### Connections (edges)
 
@@ -209,7 +211,7 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 - `Cmd/Ctrl+F` (or equivalent) opens search UI tied to the **active board** only.
 - **Scope**: full text on all note bodies (canvas + inside clusters).
 - **Highlight**: matches emphasized; non-matches dimmed; canvas does not auto-pan to hits.
-- **Filter by color** (with legend): dim non-matching items; clear with `Escape` or toggling the swatch.
+- **Filter by color** (with legend): dim non-matching notes, clusters, edges, and panel rows; clear with `Escape`, **Clear filter** at the end of the legend row, or toggling the same chip again.
 - Cross-board search is **out of scope** for v2.
 
 ### Export (v2)

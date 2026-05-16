@@ -6,6 +6,8 @@ import {
   DEFAULT_NOTE_COLOR,
 } from "@/lib/noteColors";
 import type { ClusterNoteItem } from "@/components/ClusterNode";
+import { useCategoryFilter } from "@/lib/CategoryFilterContext";
+import { noteColorMatchesFilter } from "@/lib/categoryFilterMatch";
 import { useUndoContext } from "@/lib/UndoContext";
 
 type ClusterPanelProps = {
@@ -53,6 +55,9 @@ function PanelNoteCard({
 }) {
   const colorKey = note.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
+  const categoryFilter = useCategoryFilter();
+  const filterDimmed =
+    categoryFilter !== null && !noteColorMatchesFilter(note.colorKey, categoryFilter);
   const fmt = note.formatting ?? {};
   const fmtClasses = [
     fmt.bold ? "font-bold" : "",
@@ -68,7 +73,7 @@ function PanelNoteCard({
     <div
       onClick={onSelect}
       onDragEnter={onDragEnterCard}
-      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-shadow ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ${palette.selectedRing}` : "ring-0"}`}
+      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-[opacity,box-shadow] ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ${palette.selectedRing}` : "ring-0"} ${filterDimmed ? "opacity-[0.38]" : ""}`}
     >
       {/* Drag handle — drag within panel to reorder; drag onto canvas to pull out. */}
       <div
