@@ -8,6 +8,7 @@ import {
 import type { ClusterNoteItem } from "@/components/ClusterNode";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { noteColorMatchesFilter } from "@/lib/categoryFilterMatch";
+import { useSearchSession } from "@/lib/SearchContext";
 import { useUndoContext } from "@/lib/UndoContext";
 
 type ClusterPanelProps = {
@@ -27,6 +28,7 @@ type ClusterPanelProps = {
 };
 
 function PanelNoteCard({
+  clusterId,
   note,
   selected,
   onSelect,
@@ -40,6 +42,7 @@ function PanelNoteCard({
   onDragMoveGhost,
   onDragEndGhost,
 }: {
+  clusterId: string;
   note: ClusterNoteItem;
   selected: boolean;
   onSelect: () => void;
@@ -56,8 +59,25 @@ function PanelNoteCard({
   const colorKey = note.colorKey ?? DEFAULT_NOTE_COLOR;
   const palette = NOTE_COLOR_META[colorKey];
   const categoryFilter = useCategoryFilter();
+  const search = useSearchSession();
   const filterDimmed =
     categoryFilter !== null && !noteColorMatchesFilter(note.colorKey, categoryFilter);
+  const searchDimmed =
+    search.dimNonMatches &&
+    !search.isPassiveClusterNoteMatch(clusterId, note.id) &&
+    !search.isActiveClusterNoteMatch(clusterId, note.id);
+  const dimmed = filterDimmed || searchDimmed;
+  const passiveSearch = search.isPassiveClusterNoteMatch(clusterId, note.id);
+  const activeSearch = search.isActiveClusterNoteMatch(clusterId, note.id);
+
+  let ringClass = "ring-0";
+  if (activeSearch) {
+    ringClass = `ring-4 ring-offset-1 ring-offset-white shadow-md dark:ring-offset-neutral-900 ${palette.selectedRing}`;
+  } else if (selected) {
+    ringClass = `ring-2 ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 ${palette.selectedRing}`;
+  } else if (passiveSearch) {
+    ringClass = `ring-2 ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 ${palette.selectedRing}`;
+  }
   const fmt = note.formatting ?? {};
   const fmtClasses = [
     fmt.bold ? "font-bold" : "",
@@ -73,7 +93,7 @@ function PanelNoteCard({
     <div
       onClick={onSelect}
       onDragEnter={onDragEnterCard}
-      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-[opacity,box-shadow] ${palette.cardClass} ${selected ? `ring-2 ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 ${palette.selectedRing}` : "ring-0"} ${filterDimmed ? "opacity-[0.38]" : ""}`}
+      className={`group relative cursor-pointer rounded-lg border shadow-sm transition-[opacity,box-shadow] ${palette.cardClass} ${ringClass} ${dimmed ? "opacity-[0.38]" : ""}`}
     >
       {/* Drag handle — drag within panel to reorder; drag onto canvas to pull out. */}
       <div
@@ -142,6 +162,7 @@ function PanelNoteCard({
 }
 
 export function ClusterPanel({
+  clusterId,
   notes,
   onUpdateNote,
   onDeleteNote,
@@ -305,6 +326,7 @@ export function ClusterPanel({
                       <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
                     )}
                     <PanelNoteCard
+                      clusterId={clusterId}
                       note={note}
                       selected={selectedNoteId === note.id}
                       onSelect={() => onSelectNote(note.id)}

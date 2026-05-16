@@ -15,9 +15,17 @@ type Props = {
   filterColor: NoteColorKey | null;
   /** Toggle filter for this color (same color again clears). */
   onToggleFilter: (key: NoteColorKey) => void;
+  /** When true, a color filter is logically active but visually suspended (e.g. search open). */
+  filterSuspended?: boolean;
 };
 
-export function ColorLegend({ colorLabels, onUpdateLabel, filterColor, onToggleFilter }: Props) {
+export function ColorLegend({
+  colorLabels,
+  onUpdateLabel,
+  filterColor,
+  onToggleFilter,
+  filterSuspended = false,
+}: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [editKey, setEditKey] = useState<NoteColorKey | null>(null);
   const [draft, setDraft] = useState("");
@@ -140,9 +148,14 @@ export function ColorLegend({ colorLabels, onUpdateLabel, filterColor, onToggleF
         <div key={key} className="relative inline-flex max-w-[160px] items-stretch rounded-full border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-neutral-800">
           <button
             type="button"
-            title="Filter by this color (click again to clear). Right-click or long-press to rename."
+            title={
+              filterSuspended && filterColor === key
+                ? "Filter suspended while search is open"
+                : "Filter by this color (click again to clear). Right-click or long-press to rename."
+            }
             onClick={(e) => {
               e.stopPropagation();
+              if (filterSuspended) return;
               if (suppressChipClickRef.current) {
                 suppressChipClickRef.current = false;
                 return;
@@ -155,7 +168,15 @@ export function ColorLegend({ colorLabels, onUpdateLabel, filterColor, onToggleF
             }}
             onPointerDown={attachLongPressRename(key)}
             className={`flex min-w-0 max-w-[160px] flex-shrink-0 items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-left transition-colors hover:bg-stone-50 dark:hover:bg-neutral-700/80 ${
-              filterColor === key ? "ring-2 ring-indigo-500 ring-offset-1 ring-offset-white dark:ring-offset-neutral-800" : ""
+              filterSuspended && filterColor === key
+                ? "cursor-default opacity-45 saturate-50"
+                : ""
+            } ${
+              filterColor === key && !filterSuspended
+                ? "ring-2 ring-indigo-500 ring-offset-1 ring-offset-white dark:ring-offset-neutral-800"
+                : filterColor === key && filterSuspended
+                  ? "ring-2 ring-indigo-400/40 ring-offset-1 ring-offset-white dark:ring-indigo-500/30 dark:ring-offset-neutral-800"
+                  : ""
             }`}
           >
             <span className={`h-5 w-5 flex-shrink-0 rounded-full border border-black/10 ${NOTE_COLOR_META[key].swatch}`} />

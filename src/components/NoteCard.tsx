@@ -10,6 +10,7 @@ import {
 } from "@/lib/noteColors";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { noteColorMatchesFilter } from "@/lib/categoryFilterMatch";
+import { useSearchSession } from "@/lib/SearchContext";
 import { useUndoContext } from "@/lib/UndoContext";
 
 export type NoteFontSize = "sm" | "md" | "lg" | "xl";
@@ -41,6 +42,7 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
   const { updateNodeData } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
   const categoryFilter = useCategoryFilter();
+  const search = useSearchSession();
   const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -51,6 +53,20 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
   const isDropTarget = !!data.isDropTarget;
   const filterDimmed =
     categoryFilter !== null && !noteColorMatchesFilter(data.colorKey, categoryFilter);
+  const searchDimmed =
+    search.dimNonMatches &&
+    !search.isPassiveCanvasMatch(id) &&
+    !search.isActiveCanvasMatch(id);
+  const dimmed = filterDimmed || searchDimmed;
+
+  const passiveSearch = search.isPassiveCanvasMatch(id);
+  const activeSearch = search.isActiveCanvasMatch(id);
+
+  let ringShell = "ring-transparent";
+  if (isDropTarget) ringShell = `${palette.selectedRing} shadow-lg scale-[1.03]`;
+  else if (activeSearch) ringShell = `${palette.selectedRing} z-[1] shadow-lg scale-[1.02]`;
+  else if (selected) ringShell = `${palette.selectedRing} shadow-lg`;
+  else if (passiveSearch) ringShell = `${palette.selectedRing}`;
 
   const enterEditMode = () => {
     pushSnapshot();
@@ -83,7 +99,7 @@ function NoteCard({ id, data, selected }: NodeProps<NoteFlowNode>) {
 
       <div
         onDoubleClick={!editing ? enterEditMode : undefined}
-        className={`flex w-[240px] cursor-grab flex-col rounded-lg border shadow-md outline-none ring-2 ring-offset-2 ring-offset-white transition-[opacity,transform,box-shadow] active:cursor-grabbing dark:ring-offset-neutral-900 ${palette.cardClass} ${isDropTarget ? `${palette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${palette.selectedRing} shadow-lg` : "ring-transparent"} ${editing ? "cursor-default active:cursor-default" : ""} ${filterDimmed ? "opacity-[0.38]" : ""}`}
+        className={`flex w-[240px] cursor-grab flex-col rounded-lg border shadow-md outline-none ${activeSearch ? "ring-4" : "ring-2"} ring-offset-2 ring-offset-white transition-[opacity,transform,box-shadow] active:cursor-grabbing dark:ring-offset-neutral-900 ${palette.cardClass} ${ringShell} ${editing ? "cursor-default active:cursor-default" : ""} ${dimmed ? "opacity-[0.38]" : ""}`}
       >
         {editing ? (
           <textarea
