@@ -33,7 +33,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 | Area | Intent |
 |------|--------|
-| **Categories** | Per-board color labels + legend UI; optional “filter by this color” on the canvas. |
+| **Categories** | Per-board color labels + legend UI; **filter by color** on the canvas (dim non-matches). |
 | **Palette** | Second note color set (e.g. neon) tuned for dark canvas; user or per-board choice TBD. |
 | **Search** | `Cmd/Ctrl+F` (or equivalent) on the **active board** only; highlight matches; no cross-board search in v2. |
 | **Export** | PNG (current view + fit-all) and JSON backup/import for the current board. |
@@ -45,7 +45,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 Use this list for planning issues/PRs; reorder as priorities shift.
 
 - [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
-- [ ] **Filter by color** — From legend: dim non-matching notes/clusters; clear on `Escape` or second click.  
+- [x] **Filter by color** — Legend swatch: dim non-matching notes, clusters, edges, and cluster-panel rows; clear on `Escape`, **Clear filter**, or second click on the active swatch.  
 - [ ] **Neon / vivid palette** — Second color set for notes; works with dark canvas; decision: global vs per-board toggle.  
 - [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  
 - [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; filename from board title.  

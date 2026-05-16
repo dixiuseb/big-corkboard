@@ -47,6 +47,7 @@ import {
 } from "@/lib/persistence";
 import { BoardTabs } from "@/components/BoardTabs";
 import { ColorLegend } from "@/components/ColorLegend";
+import { CategoryFilterContext } from "@/lib/CategoryFilterContext";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -141,6 +142,12 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   useEffect(() => {
     colorLabelsRef.current = colorLabels;
   }, [colorLabels]);
+
+  /** Dim canvas nodes that don’t match this note color (legend swatch). */
+  const [categoryFilterColor, setCategoryFilterColor] = useState<NoteColorKey | null>(null);
+  const toggleCategoryFilter = useCallback((key: NoteColorKey) => {
+    setCategoryFilterColor((prev) => (prev === key ? null : key));
+  }, []);
 
   const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
 
@@ -335,6 +342,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       if (e.key === "Escape") {
         setConnecting(false);
         setContextMenu(null);
+        setCategoryFilterColor(null);
         return;
       }
 
@@ -863,6 +871,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     setNodes([]);
     setEdges([]);
     setColorLabels({});
+    setCategoryFilterColor(null);
     undoStack.current = [];
     redoStack.current = [];
     setCanUndo(false);
@@ -880,9 +889,13 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const handleColorLabelUpdate = useCallback(
     (key: NoteColorKey, label: string | null) => {
       pushSnapshot();
+      const removing = label === null || label.trim() === "";
+      if (removing) {
+        setCategoryFilterColor((prev) => (prev === key ? null : prev));
+      }
       setColorLabels((prev) => {
         const next = { ...prev };
-        if (label === null || label.trim() === "") delete next[key];
+        if (removing) delete next[key];
         else next[key] = label.trim();
         return next;
       });
@@ -894,6 +907,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
 
   return (
     <UndoContext.Provider value={undoContextValue}>
+      <CategoryFilterContext.Provider value={categoryFilterColor}>
       <div
         className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
@@ -1012,8 +1026,14 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         )}
         </div>
 
-        <ColorLegend colorLabels={colorLabels} onUpdateLabel={handleColorLabelUpdate} />
+        <ColorLegend
+          colorLabels={colorLabels}
+          onUpdateLabel={handleColorLabelUpdate}
+          filterColor={categoryFilterColor}
+          onToggleFilter={toggleCategoryFilter}
+        />
       </div>
+      </CategoryFilterContext.Provider>
     </UndoContext.Provider>
   );
 }

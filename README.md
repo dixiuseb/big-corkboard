@@ -31,7 +31,7 @@ A digital cork board for planning writing projects: an infinite canvas where you
 
 ### Categories (legend)
 
-Above the board tabs, **Categories** lists **named colors** for this board only (e.g. “Characters” on amber). Use **+ Category** to pick an unused color and give it a name; click a chip to **rename** or **remove** the label. These names are saved with the board; **Undo** applies to label changes too. *(Dimming the canvas by color—filter—is a separate upcoming feature.)*
+Above the board tabs, **Categories** lists **named colors** for this board only (e.g. “Characters” on amber). Use **+ Category** to pick an unused color and give it a name. **Click** a category chip to **filter** the board by that color (click again to clear); **right-click** or **long-press** a chip to **rename** or remove its label. **Clear filter** appears at the **end** of the legend row while a filter is on. These names are saved with the board; **Undo** applies to label changes too.
 
 ### Clusters
 

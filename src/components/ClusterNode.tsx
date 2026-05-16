@@ -4,6 +4,8 @@ import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/
 import type { Node, NodeProps } from "@xyflow/react";
 import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
 import type { NoteFormatting } from "@/components/NoteCard";
+import { useCategoryFilter } from "@/lib/CategoryFilterContext";
+import { clusterNotesMatchFilter } from "@/lib/categoryFilterMatch";
 import { useLayoutEffect, type CSSProperties } from "react";
 
 // A note stored inside a cluster (not a canvas node).
@@ -32,6 +34,7 @@ const BACK_CARD_TRANSFORMS = [
 function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { setNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
+  const categoryFilter = useCategoryFilter();
   const notes = data.notes ?? [];
   // Cap the visible stack at 3 layers.
   const stackLayers = Math.min(notes.length, 3);
@@ -40,6 +43,9 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
   const frontPalette = NOTE_COLOR_META[frontColorKey];
   const isDropTarget = !!data.isDropTarget;
+  const filterDimmed =
+    categoryFilter !== null &&
+    !clusterNotesMatchFilter(notes, data.colorKey, categoryFilter);
 
   const handlePaint: CSSProperties = {
     backgroundColor: frontPalette.handleColor,
@@ -81,7 +87,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   return (
     <>
       <div
-        className="relative"
+        className={`relative transition-opacity ${filterDimmed ? "opacity-[0.38]" : ""}`}
         style={{ width: 240, paddingTop: peekPadding }}
       >
         {/* Back cards — one per stack layer behind the front; each uses that note's color. */}
