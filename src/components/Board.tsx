@@ -1700,12 +1700,10 @@ function BoardCanvas({
                 id="nest-cluster-title"
                 className="text-base font-semibold text-stone-800 dark:text-stone-100"
               >
-                Merge clusters
+                Merge clusters?
               </h2>
               <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-                One cluster was dropped onto another. Nest keeps the dropped cluster as a grouped block
-                inside the target. Flatten adds all notes to the target list. Cancel leaves the board as
-                before this drag.
+                Do you want to merge these notes into a single cluster or add them as a nested cluster?
               </p>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button
@@ -1720,7 +1718,7 @@ function BoardCanvas({
                   onClick={applyFlattenIntoCluster}
                   className="rounded-lg border border-black/15 px-3 py-2 text-sm text-stone-700 transition-colors hover:bg-black/5 dark:border-white/15 dark:text-stone-200 dark:hover:bg-white/8"
                 >
-                  Flatten into notes
+                  Merge into single cluster
                 </button>
                 <button
                   type="button"
