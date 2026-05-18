@@ -29,14 +29,16 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 **Theme:** More useful and polished **without a backend** — still local / client-only unless a feature explicitly adds something like optional export-only flows.
 
+**Product framing:** The tabbed boards in the UI are one **workspace** (one project). v2 **JSON export/import** is scoped to the **whole workspace** so it doubles as the manual “switch project” path until v3 desktop save files ship. See [SPEC.md — Workspaces vs boards](./SPEC.md#workspaces-vs-boards) and [Export (v2)](./SPEC.md#export-v2).
+
 ### Scope
 
 | Area | Intent |
 |------|--------|
-| **Categories** | Per-board color labels + legend UI; optional “filter by this color” on the canvas. |
-| **Palette** | Second note color set (e.g. neon) tuned for dark canvas; user or per-board choice TBD. |
-| **Search** | `Cmd/Ctrl+F` (or equivalent) on the **active board** only; highlight matches; no cross-board search in v2. |
-| **Export** | PNG (current view + fit-all) and JSON backup/import for the current board. |
+| **Categories** | Per-board color labels + legend UI; **filter by color** on the canvas (dim non-matches). |
+| **Palette** | **Eight** unified, high-contrast note colors with **light/dark** surfaces (no separate user “theme” pick); see `noteColors.ts`. |
+| **Search** | `Cmd/Ctrl+F` on the **active board** only: floating bar, cycling, pan/zoom-to-readable for the active hit, cluster panel integration, color-filter suspend while open. No cross-board search in v2. See [SPEC.md](./SPEC.md#search-v2). |
+| **Export** | **PNG:** current view + fit-all. **JSON:** versioned snapshot of **all boards in the workspace**; import **replaces** the in-memory workspace after confirmation (no merge in v2). Same envelope becomes the v3 desktop save file. See [SPEC.md — Export (v2)](./SPEC.md#export-v2). |
 | **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel shows children as **indented** rows; optional panel tree-DnD later. Deeper hierarchy → **nested corkboards (v3)**. |
 | **Polish** | Small UX wins that don’t warrant their own row — track as individual GitHub issues. |
 
@@ -44,12 +46,12 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 Use this list for planning issues/PRs; reorder as priorities shift.
 
-- [ ] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
-- [ ] **Filter by color** — From legend: dim non-matching notes/clusters; clear on `Escape` or second click.  
-- [ ] **Neon / vivid palette** — Second color set for notes; works with dark canvas; decision: global vs per-board toggle.  
-- [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  
-- [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; filename from board title.  
-- [ ] **Export / import JSON** — Download board state; file pick or drop to restore (define conflict behavior: replace board vs merge TBD).  
+- [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
+- [x] **Filter by color** — Legend swatch: dim non-matching notes, clusters, edges, and cluster-panel rows; clear on `Escape`, **Clear filter**, or second click on the active swatch.  
+- [x] **Note palette** — Eight theme-aware colors (light + dark card surfaces, label-tint handles/rings); legacy six-color keys migrate on load.  
+- [x] **Search** — [SPEC.md — Search (v2)](./SPEC.md#search-v2): floating top-center bar (non-modal), debounced query, match rings + dim non-matches, cycle with wrap, smart pan/zoom for active match, cluster-internal stops + panel, color filter suspended while open.
+- [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; default filename from board title + timestamp.  
+- [ ] **Export / import JSON** — Versioned `{ version, exportedAt, boards[] }` for **all boards in the workspace**; file pick or drop; v2 conflict behavior **replace workspace** with explicit overwrite warning (manual project switch). **Implementation:** persistence uses split `localStorage` keys (`corkboard:boards` + per-board `corkboard:board:{id}`); the exporter must **gather every board** into one snapshot, not only the active board’s in-memory state. Same format = v3 save file per [SPEC.md](./SPEC.md#desktop-application-and-save-files-v3).  
 - [ ] **Multi-select & bulk actions** — Not polish: new interaction model + toolbar/cluster behavior. Tie to your GitHub issues as you open/close them.  
   - **Selection:** additive select with **Ctrl/Cmd+click**; optional **marquee / drag-rectangle** (likely gated behind a **Select** mode or modifier so it doesn’t fight pan/drag on the canvas).  
   - **Bulk color & formatting:** apply to every selected **note** (and define rules for **clusters** — e.g. front-card color only vs whole cluster).  
@@ -70,13 +72,21 @@ Planned v2 **search / export / categories / palette** detail: [SPEC.md](./SPEC.m
 
 ## v3 — planned
 
-Backend + heavier client features: **image nodes** (IndexedDB locally, Supabase Storage when synced), **cloud sync** (Supabase auth, last-write-wins per board for solo v3), **user-defined colors/themes**, **Capacitor** mobile shell + touch polish, and **nested corkboards** (sub-board–level hierarchy — distinct from **v2 one-level nested clusters**, see [SPEC.md](./SPEC.md)). See [SPEC.md](./SPEC.md) sections *Image nodes*, *Cloud sync*, *Mobile*.
+**Primary deliverable:** **Desktop app** (workspace = save file on disk) — **Tauri**-wrapped Next/React, with **New / Open / Save / Save as**, **recent files**, and **debounced auto-save** to the filesystem. The **v2 JSON document** is the on-disk format (e.g. `.corkboard`); no second schema.
+
+**Web build (bigcorkboard.com):** stays **`localStorage`** + current UX; honest copy about browser-stored data; **JSON export/import** as backup and portability; **no cloud sync** in v3.
+
+**Also in v3 (feature track, not blocked on sync):** **image nodes** (IndexedDB on web; consistent with workspace file on desktop), **user-defined colors/themes**, and **nested corkboards** (sub-board scope — distinct from [v2 nested clusters](./SPEC.md)). See [SPEC.md](./SPEC.md) *Image nodes*, *Desktop application and save files*, *Nested corkboards*.
+
+**Explicitly not v3:** optional **personal** cloud sync (moved to v4+). **Phone** is not a target; **tablet** remains post–desktop (see [SPEC.md — Mobile](./SPEC.md#mobile)).
 
 ---
 
-## v4 — planned
+## v4+ — planned
 
-Collaboration: shareable read-only links, real-time co-editing, full-text search across all boards.
+**Optional personal cloud sync** (e.g. **Supabase**): opt-in, **last-write-wins per workspace**, solo-focused; app remains fully usable offline without an account. **Collaboration** (shareable workspaces, real-time co-editing) is a **separate** track — not bundled with first sync.
+
+Other long-hanging fruit (examples): shareable read-only links, **cross-board / cross-workspace search** if product still wants it.
 
 ---
 
@@ -85,7 +95,7 @@ Collaboration: shareable read-only links, real-time co-editing, full-text search
 | Doc | Purpose |
 |-----|---------|
 | **README.md** | Short pitch, live link, **how to use** the app, where data lives, minimal contributor pointers. |
-| **SPEC.md** | Goals, mental model, data model, tech stack, design decisions, future (v2–v4) intent, dev setup. |
+| **SPEC.md** | Goals, mental model, data model, tech stack, design decisions, future (v2–v4+) intent, dev setup. |
 | **ROADMAP.md** (this file) | What shipped, what’s next, checklists by version. |
 
 When a version ships, update the intro in **README** if user-facing behavior changes, sync **SPEC** / **ROADMAP** milestones, and tick items here.

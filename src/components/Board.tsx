@@ -42,9 +42,16 @@ import {
   loadActiveBoard,
   saveActiveBoard,
   type BoardMeta,
+  type BoardColorLabels,
   type PersistedBoardState,
 } from "@/lib/persistence";
 import { BoardTabs } from "@/components/BoardTabs";
+import { ColorLegend } from "@/components/ColorLegend";
+import { CategoryFilterContext } from "@/lib/CategoryFilterContext";
+import { SearchContext, buildSearchSessionValue } from "@/lib/SearchContext";
+import { buildSearchMatches } from "@/lib/searchMatches";
+import { BoardSearchBar } from "@/components/BoardSearchBar";
+import { SearchMatchViewport } from "@/components/SearchMatchViewport";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -52,7 +59,7 @@ type ContextMenu = { edgeId: string; x: number; y: number };
 
 const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
 
-type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[] };
+type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[]; colorLabels: BoardColorLabels };
 const MAX_HISTORY = 50;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -132,6 +139,46 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     (savedState?.edges ?? []) as BoardEdgeType[],
   );
 
+  const [colorLabels, setColorLabels] = useState<BoardColorLabels>(
+    () => savedState?.colorLabels ?? {},
+  );
+  const colorLabelsRef = useRef(colorLabels);
+  useEffect(() => {
+    colorLabelsRef.current = colorLabels;
+  }, [colorLabels]);
+
+  /** Dim canvas nodes that don’t match this note color (legend swatch). */
+  const [categoryFilterColor, setCategoryFilterColor] = useState<NoteColorKey | null>(null);
+  const toggleCategoryFilter = useCallback((key: NoteColorKey) => {
+    setCategoryFilterColor((prev) => (prev === key ? null : key));
+  }, []);
+
+  // ── Search (Cmd/Ctrl+F) ───────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      setDebouncedSearchQuery("");
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchInput.trim().toLowerCase());
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [searchInput, searchOpen]);
+
+  useEffect(() => {
+    setSearchActiveIndex(0);
+  }, [debouncedSearchQuery]);
+
+  const searchMatches = useMemo(
+    () => buildSearchMatches(nodes, debouncedSearchQuery),
+    [nodes, debouncedSearchQuery],
+  );
+
   const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
 
   // Tracks the latest viewport so it's included in auto-saves.
@@ -145,6 +192,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport: viewportRef.current,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, []);
 
@@ -155,10 +203,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         nodes: serializeNodes(nodes),
         edges: serializeEdges(edges),
         viewport: viewportRef.current,
+        colorLabels: { ...colorLabelsRef.current },
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [nodes, edges, boardId]);
+  }, [nodes, edges, colorLabels, boardId]);
 
   const onMoveEnd = useCallback((_: unknown, viewport: Viewport) => {
     viewportRef.current = viewport;
@@ -167,6 +216,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, [boardId]);
 
@@ -201,7 +251,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const [canRedo, setCanRedo] = useState(false);
 
   const pushSnapshot = useCallback(() => {
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     // Any new action clears the redo branch.
     redoStack.current = [];
@@ -212,24 +266,34 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const undo = useCallback(() => {
     if (undoStack.current.length === 0) return;
     // Save current live state so redo can return here.
-    redoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    redoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = undoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   const redo = useCallback(() => {
     if (redoStack.current.length === 0) return;
     // Save current live state so undo can return here.
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = redoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
   const prevDropTargetRef = useRef<string | null>(null);
@@ -289,6 +353,38 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     closeContextMenu();
   }, [setEdges, closeContextMenu, pushSnapshot]);
 
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchInput("");
+    setDebouncedSearchQuery("");
+    setSearchActiveIndex(0);
+    setConnecting(false);
+    setContextMenu(null);
+  }, [setConnecting, setContextMenu]);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+  }, []);
+
+  const goSearchNext = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i + 1) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const goSearchPrev = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i - 1 + searchMatches.length) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const searchSessionValue = useMemo(
+    () => buildSearchSessionValue(searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex),
+    [searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex],
+  );
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -305,9 +401,20 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         return;
       }
 
+      if (isCmd && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+
       if (e.key === "Escape") {
+        if (searchOpen) {
+          closeSearch();
+          return;
+        }
         setConnecting(false);
         setContextMenu(null);
+        setCategoryFilterColor(null);
         return;
       }
 
@@ -344,7 +451,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undo, redo, pushSnapshot, setNodes, setEdges]);
+  }, [undo, redo, pushSnapshot, setNodes, setEdges, searchOpen, closeSearch]);
 
   // ── Cluster panel state ────────────────────────────────────────────────────
   const expandedCluster = useMemo(
@@ -529,6 +636,29 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (noteId) {
       setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
     }
+  }, [setNodes]);
+
+  const onSearchClusterInternalActive = useCallback((clusterId: string, noteId: string) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "clusterNode") return n;
+        const expanded = n.id === clusterId;
+        return n.data.expanded === expanded ? n : { ...n, data: { ...n.data, expanded } };
+      }),
+    );
+    setSelectedPanelNoteId(noteId);
+  }, [setNodes]);
+
+  const onSearchCollapseClusters = useCallback(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type === "clusterNode" && n.data.expanded) {
+          return { ...n, data: { ...n.data, expanded: false } };
+        }
+        return n;
+      }),
+    );
+    setSelectedPanelNoteId(null);
   }, [setNodes]);
 
   // Settings shown in the toolbar — active note's, or the running default.
@@ -835,30 +965,58 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (!window.confirm("Clear this board? All notes and connections will be removed.")) return;
     setNodes([]);
     setEdges([]);
+    setColorLabels({});
+    setCategoryFilterColor(null);
     undoStack.current = [];
     redoStack.current = [];
     setCanUndo(false);
     setCanRedo(false);
     setResetViewportSignal((s) => s + 1);
     viewportRef.current = DEFAULT_VIEWPORT;
-    saveBoardState(boardId, { nodes: [], edges: [], viewport: DEFAULT_VIEWPORT });
-  }, [boardId, setNodes, setEdges, setCanUndo, setCanRedo]);
+    saveBoardState(boardId, {
+      nodes: [],
+      edges: [],
+      viewport: DEFAULT_VIEWPORT,
+      colorLabels: {},
+    });
+    closeSearch();
+  }, [boardId, setNodes, setEdges, setColorLabels, setCanUndo, setCanRedo, closeSearch]);
+
+  const handleColorLabelUpdate = useCallback(
+    (key: NoteColorKey, label: string | null) => {
+      pushSnapshot();
+      const removing = label === null || label.trim() === "";
+      if (removing) {
+        setCategoryFilterColor((prev) => (prev === key ? null : prev));
+      }
+      setColorLabels((prev) => {
+        const next = { ...prev };
+        if (removing) delete next[key];
+        else next[key] = label.trim();
+        return next;
+      });
+    },
+    [pushSnapshot],
+  );
 
   const undoContextValue = useMemo(() => ({ pushSnapshot }), [pushSnapshot]);
 
   return (
     <UndoContext.Provider value={undoContextValue}>
+      <SearchContext.Provider value={searchSessionValue}>
+      <CategoryFilterContext.Provider value={searchOpen ? null : categoryFilterColor}>
       <div
-        className="h-full w-full bg-white dark:bg-neutral-900"
+        className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
         onClick={contextMenu ? closeContextMenu : undefined}
         onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
-        <ReactFlow
-          className="h-full w-full touch-manipulation"
-          colorMode="system"
+        <div className="relative min-h-0 flex-1">
+          <ReactFlow
+            className="h-full w-full touch-manipulation"
+            colorMode="system"
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -886,6 +1044,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
+            searchOpen={searchOpen}
+            onOpenSearch={openSearch}
             onClearBoard={handleClearBoard}
             colorKey={toolbarColorKey}
             formatting={toolbarFormatting}
@@ -902,6 +1062,25 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           <Controls />
           <ViewportResetter signal={resetViewportSignal} />
           <SFPCapture sfpRef={sfpRef} />
+          <BoardSearchBar
+            open={searchOpen}
+            inputValue={searchInput}
+            onInputChange={setSearchInput}
+            onClose={closeSearch}
+            matchesLength={searchMatches.length}
+            activeIndex={searchActiveIndex}
+            onNext={goSearchNext}
+            onPrev={goSearchPrev}
+            debouncedQuery={debouncedSearchQuery}
+          />
+          <SearchMatchViewport
+            open={searchOpen}
+            debouncedQuery={debouncedSearchQuery}
+            matches={searchMatches}
+            activeIndex={searchActiveIndex}
+            onClusterInternalActive={onSearchClusterInternalActive}
+            onCollapseClusters={onSearchCollapseClusters}
+          />
         </ReactFlow>
 
         {/* Cluster side panel */}
@@ -963,7 +1142,18 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             </button>
           </div>
         )}
+        </div>
+
+        <ColorLegend
+          colorLabels={colorLabels}
+          onUpdateLabel={handleColorLabelUpdate}
+          filterColor={categoryFilterColor}
+          onToggleFilter={toggleCategoryFilter}
+          filterSuspended={searchOpen && categoryFilterColor != null}
+        />
       </div>
+      </CategoryFilterContext.Provider>
+      </SearchContext.Provider>
     </UndoContext.Provider>
   );
 }
