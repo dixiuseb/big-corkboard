@@ -1,6 +1,7 @@
 import type { NoteColorKey } from "@/lib/noteColors";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
-import type { ClusterNoteItem } from "@/components/ClusterNode";
+import type { ClusterMember } from "@/lib/clusterMembers";
+import { clusterMembersMatchFilter } from "@/lib/clusterMembers";
 
 /** True when this note color counts as the active category filter. */
 export function noteColorMatchesFilter(
@@ -11,15 +12,13 @@ export function noteColorMatchesFilter(
 }
 
 /**
- * Cluster matches the filter if **any** contained note matches, or the cluster is empty
- * and its fallback `colorKey` matches (legacy / edge case).
+ * Cluster matches the filter if **any** contained note matches (any depth),
+ * or the cluster is empty and its fallback `colorKey` matches.
  */
 export function clusterNotesMatchFilter(
-  notes: ClusterNoteItem[] | undefined,
+  notes: ClusterMember[] | undefined,
   clusterColorKey: NoteColorKey | undefined,
   filter: NoteColorKey,
 ): boolean {
-  const list = notes ?? [];
-  if (list.length === 0) return noteColorMatchesFilter(clusterColorKey, filter);
-  return list.some((n) => noteColorMatchesFilter(n.colorKey, filter));
+  return clusterMembersMatchFilter(notes, clusterColorKey, filter);
 }

@@ -71,6 +71,29 @@ function migrateColorLabels(raw: unknown): BoardColorLabels | undefined {
   return next;
 }
 
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 } as const;
+
+/** Coerce stored / imported viewport values to finite numbers (clamped to app zoom range). */
+export function parsePersistedViewport(raw: unknown): { x: number; y: number; zoom: number } {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_VIEWPORT };
+  const o = raw as Record<string, unknown>;
+  const x = typeof o.x === "number" && Number.isFinite(o.x) ? o.x : 0;
+  const y = typeof o.y === "number" && Number.isFinite(o.y) ? o.y : 0;
+  let zoom = typeof o.zoom === "number" && Number.isFinite(o.zoom) ? o.zoom : 1;
+  zoom = Math.min(2, Math.max(0.15, zoom));
+  return { x, y, zoom };
+}
+
+/** Normalize arbitrary JSON (e.g. import) into persisted board shape with color migrations. */
+export function normalizeImportedBoardState(raw: unknown): PersistedBoardState {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const nodes = migrateNodes(Array.isArray(o.nodes) ? (o.nodes as object[]) : []);
+  const edges = Array.isArray(o.edges) ? (o.edges as object[]) : [];
+  const viewport = parsePersistedViewport(o.viewport);
+  const colorLabels = migrateColorLabels(o.colorLabels) ?? undefined;
+  return { nodes, edges, viewport, colorLabels };
+}
+
 export function loadBoardState(id: string): PersistedBoardState | null {
   try {
     const raw = localStorage.getItem(boardKey(id));
@@ -80,6 +103,7 @@ export function loadBoardState(id: string): PersistedBoardState | null {
       ...parsed,
       nodes: migrateNodes(parsed.nodes ?? []),
       colorLabels: migrateColorLabels(parsed.colorLabels) ?? parsed.colorLabels,
+      viewport: parsePersistedViewport(parsed.viewport),
     };
   } catch {
     return null;

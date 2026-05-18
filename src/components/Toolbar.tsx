@@ -10,6 +10,12 @@ import {
 } from "@/lib/noteColors";
 import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
+import { exportBoardFlowPng, type BoardPngExportMode } from "@/lib/boardPngExport";
+
+export type WorkspaceFileMenuActions = {
+  onExportWorkspaceJson: () => void;
+  onRequestImportWorkspaceJson: () => void;
+};
 
 function AboutMenu() {
   const linkClass =
@@ -126,6 +132,181 @@ function AboutMenu() {
   );
 }
 
+function FileMenu({
+  boardTitle,
+  workspaceFile,
+}: {
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
+}) {
+  const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
+  const [open, setOpen] = useState(false);
+  const [exportingPng, setExportingPng] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    if (!open || !buttonRef.current) {
+      setPlacement(null);
+      return;
+    }
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPlacement({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    updatePlacement();
+  }, [updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => updatePlacement();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const runExport = useCallback(
+    async (mode: BoardPngExportMode) => {
+      const el = document.querySelector("[data-corkboard-react-flow]");
+      if (!(el instanceof HTMLElement)) {
+        window.alert("Could not find the canvas to export.");
+        return;
+      }
+      setExportingPng(true);
+      try {
+        await exportBoardFlowPng(el, boardTitle, mode, {
+          fitView,
+          getViewport,
+          setViewport,
+          getNodes,
+        });
+        setOpen(false);
+      } catch (e) {
+        console.error(e);
+        window.alert("PNG export failed. Try again, or close other overlays and retry.");
+      } finally {
+        setExportingPng(false);
+      }
+    },
+    [boardTitle, fitView, getViewport, setViewport, getNodes],
+  );
+
+  const menu =
+    open &&
+    placement &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        ref={menuRef}
+        role="menu"
+        style={{
+          position: "fixed",
+          top: placement.top,
+          right: placement.right,
+          zIndex: 10050,
+          width: "min(20rem, calc(100vw - 2rem))",
+        }}
+        className="rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+      >
+        <div className="border-b border-black/8 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:border-white/8 dark:text-white/40">
+          File
+        </div>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => void runExport("viewport")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (current view)…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => void runExport("fitAll")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (fit all notes)…
+        </button>
+        <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => {
+            try {
+              workspaceFile.onExportWorkspaceJson();
+              setOpen(false);
+            } catch (e) {
+              console.error(e);
+              window.alert("Could not export the workspace.");
+            }
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export workspace as JSON…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => {
+            setOpen(false);
+            workspaceFile.onRequestImportWorkspaceJson();
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Import workspace…
+        </button>
+      </div>,
+      document.body,
+    );
+
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        disabled={exportingPng}
+        title="File — export PNG, backup workspace JSON, import workspace"
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+      >
+        File
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {menu}
+    </div>
+  );
+}
+
 const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "sm", label: "S" },
   { key: "md", label: "M" },
@@ -133,7 +314,11 @@ const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "xl", label: "XL" },
 ];
 
+export type CanvasTool = "pan" | "select";
+
 type ToolbarProps = {
+  canvasTool: CanvasTool;
+  onCanvasToolChange: (tool: CanvasTool) => void;
   connecting: boolean;
   onToggleConnecting: () => void;
   onUndo: () => void;
@@ -142,6 +327,9 @@ type ToolbarProps = {
   canRedo: boolean;
   searchOpen: boolean;
   onOpenSearch: () => void;
+  /** Active board tab title — used in PNG export filenames. */
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
   onClearBoard: () => void;
   // Note formatting — reflects the selected note's settings, or the running default.
   colorKey: NoteColorKey;
@@ -158,6 +346,8 @@ type ToolbarProps = {
 };
 
 export function Toolbar({
+  canvasTool,
+  onCanvasToolChange,
   connecting,
   onToggleConnecting,
   onUndo,
@@ -166,6 +356,8 @@ export function Toolbar({
   canRedo,
   searchOpen,
   onOpenSearch,
+  boardTitle,
+  workspaceFile,
   onClearBoard,
   colorKey,
   formatting,
@@ -180,6 +372,29 @@ export function Toolbar({
 }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
+
+  /** Shift mirrors Select in the UI while Pan mode stays the stored tool. */
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const sync = (e: KeyboardEvent) => setShiftHeld(e.shiftKey);
+    const clear = () => setShiftHeld(false);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", sync);
+    window.addEventListener("keyup", sync);
+    window.addEventListener("blur", clear);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("keydown", sync);
+      window.removeEventListener("keyup", sync);
+      window.removeEventListener("blur", clear);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  const panLooksActive = canvasTool === "pan" && !shiftHeld;
+  const selectLooksActive = canvasTool === "select" || shiftHeld;
 
   const centrePosition = useCallback(
     () =>
@@ -336,10 +551,10 @@ export function Toolbar({
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
-        {/* Create cluster (canvas note only) */}
+        {/* Create cluster: one note → promote; multiple notes only → combine */}
         <button
           type="button"
-          title="Create cluster from selected note"
+          title="Cluster — turn one note into a cluster, or combine several selected notes (⌘/Ctrl-click to multi-select)"
           onClick={onCreateCluster}
           disabled={!canCreateCluster}
           className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -353,10 +568,10 @@ export function Toolbar({
           Cluster
         </button>
 
-        {/* Delete selected note */}
+        {/* Delete selected canvas nodes and/or panel note */}
         <button
           type="button"
-          title="Delete selected note"
+          title="Delete selected items"
           onClick={onDeleteSelected}
           disabled={!canDelete}
           className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/40 hover:bg-red-50 hover:text-red-500 dark:text-white/30 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -394,6 +609,35 @@ export function Toolbar({
           Connect
         </button>
 
+        <div className="flex overflow-hidden rounded-lg border border-black/15 dark:border-white/15">
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("pan")}
+            title="Pan — drag the canvas with the left mouse button (default)"
+            aria-pressed={panLooksActive}
+            className={`border-0 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              panLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Pan
+          </button>
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("select")}
+            title="Select — drag on empty canvas to select notes (same as Shift in Pan). Middle or right mouse still pans."
+            aria-pressed={selectLooksActive}
+            className={`border-0 border-l border-black/10 px-2.5 py-1.5 text-xs font-medium transition-colors dark:border-white/10 ${
+              selectLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Select
+          </button>
+        </div>
+
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
         {/* Clear board */}
@@ -407,7 +651,10 @@ export function Toolbar({
         </button>
         </div>
 
-        <AboutMenu />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FileMenu boardTitle={boardTitle} workspaceFile={workspaceFile} />
+          <AboutMenu />
+        </div>
       </div>
     </Panel>
   );

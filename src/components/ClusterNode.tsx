@@ -3,22 +3,22 @@
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
-import type { NoteFormatting } from "@/components/NoteCard";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
-import { clusterNotesMatchFilter } from "@/lib/categoryFilterMatch";
+import {
+  clusterMembersMatchFilter,
+  type ClusterMember,
+  type ClusterNoteItem,
+  countLeafNotes,
+  firstLeafNote,
+  leafPrefixInMemberOrder,
+} from "@/lib/clusterMembers";
 import { useSearchSession } from "@/lib/SearchContext";
 import { useLayoutEffect } from "react";
 
-// A note stored inside a cluster (not a canvas node).
-export type ClusterNoteItem = {
-  id: string;
-  body: string;
-  colorKey?: NoteColorKey;
-  formatting?: NoteFormatting;
-};
+export type { ClusterMember, ClusterNestedMember, ClusterNoteItem } from "@/lib/clusterMembers";
 
 export type ClusterNodeData = {
-  notes: ClusterNoteItem[];
+  notes: ClusterMember[];
   colorKey?: NoteColorKey;
   expanded?: boolean;
   isDropTarget?: boolean;
@@ -38,16 +38,17 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const categoryFilter = useCategoryFilter();
   const search = useSearchSession();
   const notes = data.notes ?? [];
-  // Cap the visible stack at 3 layers.
-  const stackLayers = Math.min(notes.length, 3);
-  const frontNote = notes[0];
+  const leafCount = countLeafNotes(notes);
+  const stackLayers = Math.min(leafCount, 3);
+  const stackNotes = leafPrefixInMemberOrder(notes, stackLayers);
+  const frontNote = firstLeafNote(notes);
   // Front card + handles follow the top note; fall back to cluster colorKey for older data.
   const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
   const frontPalette = NOTE_COLOR_META[frontColorKey];
   const isDropTarget = !!data.isDropTarget;
   const filterDimmed =
     categoryFilter !== null &&
-    !clusterNotesMatchFilter(notes, data.colorKey, categoryFilter);
+    !clusterMembersMatchFilter(notes, data.colorKey, categoryFilter);
   const searchDimmed =
     search.dimNonMatches && !search.clusterHasPassiveOrActiveMatch(id);
   const outerDimmed = filterDimmed || searchDimmed;
@@ -93,6 +94,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
     id,
     updateNodeInternals,
     notes.length,
+    leafCount,
     peekPadding,
     stackLayers,
     frontNote?.body,
@@ -110,7 +112,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
         {Array.from({ length: stackLayers - 1 }).map((_, i) => {
           // i = 0 is furthest back → last visible note in the capped stack (e.g. notes[2] when 3+ notes).
           const noteIndex = stackLayers - 1 - i;
-          const backNote = notes[noteIndex];
+          const backNote = stackNotes[noteIndex];
           const backKey = backNote?.colorKey ?? DEFAULT_NOTE_COLOR;
           const backPalette = NOTE_COLOR_META[backKey];
           return (
@@ -134,9 +136,13 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
         >
           {/* Header row: note count + expand button */}
           <div className="flex items-center justify-between px-3 pt-2">
+          {stackNotes.length === 0 ? (
+            <span className="text-xs font-medium opacity-50">0 notes</span>
+          ) : (
             <span className="text-xs font-medium opacity-50">
-              {notes.length} {notes.length === 1 ? "note" : "notes"}
+              {leafCount} {leafCount === 1 ? "note" : "notes"}
             </span>
+          )}
             <button
               type="button"
               title="Expand cluster"
