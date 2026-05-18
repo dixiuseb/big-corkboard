@@ -191,6 +191,123 @@ export function reorderNotesWithinNestedCluster(
   });
 }
 
+/** Where a panel leaf note lives before a move (cluster side panel only). */
+export type PanelLeafSource =
+  | { type: "root"; memberIndex: number }
+  | { type: "nested"; nestedId: string; noteIndex: number };
+
+export function findLeafSourceLocation(members: ClusterMember[], noteId: string): PanelLeafSource | null {
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    if (isNestedClusterMember(m)) {
+      const j = m.notes.findIndex((n) => n.id === noteId);
+      if (j >= 0) return { type: "nested", nestedId: m.id, noteIndex: j };
+    } else if (m.id === noteId) {
+      return { type: "root", memberIndex: i };
+    }
+  }
+  return null;
+}
+
+export type PanelLeafDropTarget =
+  | { type: "root"; insertBeforeMemberIndex: number }
+  | { type: "nested"; nestedId: string; insertBeforeNoteIndex: number };
+
+function insertRootNoteAtMemberIndex(members: ClusterMember[], note: ClusterNoteItem, insertBefore: number): ClusterMember[] {
+  const next = [...members];
+  const clamped = Math.max(0, Math.min(insertBefore, next.length));
+  next.splice(clamped, 0, { ...note });
+  return next;
+}
+
+function insertNoteIntoNestedAt(
+  members: ClusterMember[],
+  nestedId: string,
+  note: ClusterNoteItem,
+  insertBeforeNoteIndex: number,
+): ClusterMember[] {
+  return members.map((m) => {
+    if (!isNestedClusterMember(m) || m.id !== nestedId) return m;
+    const list = [...m.notes];
+    const clamped = Math.max(0, Math.min(insertBeforeNoteIndex, list.length));
+    list.splice(clamped, 0, { ...note });
+    return { ...m, notes: list };
+  });
+}
+
+function mapInsertRootMemberIndex(
+  oldMembers: ClusterMember[],
+  without: ClusterMember[],
+  insertBeforeOld: number,
+  movedNoteId: string,
+): number {
+  if (insertBeforeOld <= 0) return 0;
+  if (insertBeforeOld >= oldMembers.length) return without.length;
+  const anchor = oldMembers[insertBeforeOld];
+  const idx = without.findIndex((m) => (isNestedClusterMember(m) ? m.id : m.id) === (isNestedClusterMember(anchor) ? anchor.id : anchor.id));
+  if (idx !== -1) return idx;
+  if (!isNestedClusterMember(anchor) && anchor.id === movedNoteId) {
+    return Math.min(insertBeforeOld, without.length);
+  }
+  return without.length;
+}
+
+function mapInsertNestedNoteIndex(
+  without: ClusterMember[],
+  nestedId: string,
+  insertBeforeOld: number,
+  src: PanelLeafSource,
+): number {
+  const block = without.find((m) => isNestedClusterMember(m) && m.id === nestedId) as ClusterNestedMember | undefined;
+  if (!block) return 0;
+  let j = insertBeforeOld;
+  if (src.type === "nested" && src.nestedId === nestedId && src.noteIndex < j) {
+    j -= 1;
+  }
+  return Math.max(0, Math.min(j, block.notes.length));
+}
+
+function isNoOpPanelMove(src: PanelLeafSource, dest: PanelLeafDropTarget): boolean {
+  if (dest.type === "root" && src.type === "root") {
+    return dest.insertBeforeMemberIndex === src.memberIndex;
+  }
+  if (dest.type === "nested" && src.type === "nested" && dest.nestedId === src.nestedId) {
+    return dest.insertBeforeNoteIndex === src.noteIndex;
+  }
+  return false;
+}
+
+/**
+ * Move one leaf note to a new slot in the cluster panel (root list or inside a nested block).
+ * `insertBefore*` indices are from the panel UI (“insert before” line); 0..length allows append.
+ */
+export function movePanelLeafNote(
+  members: ClusterMember[],
+  noteId: string,
+  dest: PanelLeafDropTarget,
+): ClusterMember[] {
+  const note = findLeafNote(members, noteId);
+  if (!note) return members;
+  const src = findLeafSourceLocation(members, noteId);
+  if (!src) return members;
+  if (isNoOpPanelMove(src, dest)) return members;
+
+  if (dest.type === "nested") {
+    const hasDest = members.some((m) => isNestedClusterMember(m) && m.id === dest.nestedId);
+    if (!hasDest) return members;
+  }
+
+  const without = removeLeafNoteFromMembers(members, noteId);
+
+  if (dest.type === "nested") {
+    const insertJ = mapInsertNestedNoteIndex(without, dest.nestedId, dest.insertBeforeNoteIndex, src);
+    return insertNoteIntoNestedAt(without, dest.nestedId, note, insertJ);
+  }
+
+  const insertI = mapInsertRootMemberIndex(members, without, dest.insertBeforeMemberIndex, noteId);
+  return insertRootNoteAtMemberIndex(without, note, insertI);
+}
+
 /** Append flattened notes from a removed cluster canvas node (its members) to the end. */
 export function appendFlattenedClusterMembers(
   target: ClusterMember[],

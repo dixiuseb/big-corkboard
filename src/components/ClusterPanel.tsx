@@ -6,7 +6,7 @@ import {
   DEFAULT_NOTE_COLOR,
 } from "@/lib/noteColors";
 import type { ClusterMember, ClusterNoteItem } from "@/lib/clusterMembers";
-import { isNestedClusterMember, reorderNotesWithinNestedCluster } from "@/lib/clusterMembers";
+import { isNestedClusterMember, movePanelLeafNote } from "@/lib/clusterMembers";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { noteColorMatchesFilter } from "@/lib/categoryFilterMatch";
 import { useSearchSession } from "@/lib/SearchContext";
@@ -180,15 +180,18 @@ export function ClusterPanel({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { pushSnapshot } = useUndoContext();
 
-  // ── Reorder drag state ────────────────────────────────────────────────────
-  const [reorderDragIndex, setReorderDragIndex] = useState<number | null>(null);
-  const [reorderOverIndex, setReorderOverIndex] = useState<number | null>(null);
-  /** Reorder drag for notes inside a nested cluster block (root list uses reorderDragIndex / reorderOverIndex). */
-  const [nestedReorder, setNestedReorder] = useState<{
-    nestedClusterId: string;
-    dragIndex: number;
-    overIndex: number | null;
-  } | null>(null);
+  type PanelLeafDragState = {
+    noteId: string;
+    source:
+      | { kind: "root"; memberIndex: number }
+      | { kind: "nested"; nestedId: string; noteIndex: number };
+    target:
+      | { kind: "root"; insertBeforeMemberIndex: number }
+      | { kind: "nested"; nestedId: string; insertBeforeNoteIndex: number }
+      | null;
+  };
+
+  const [panelDrag, setPanelDrag] = useState<PanelLeafDragState | null>(null);
 
   // ── Drag-out ghost state ──────────────────────────────────────────────────
   const [ghostNote, setGhostNote] = useState<ClusterNoteItem | null>(null);
@@ -232,43 +235,72 @@ export function ClusterPanel({
     if (clearGhostRef) clearGhostRef.current = endGhost;
   }, [clearGhostRef, endGhost]);
 
-  const clearReorderDragState = () => {
-    setReorderDragIndex(null);
-    setReorderOverIndex(null);
-    setNestedReorder(null);
+  const clearPanelDrag = () => {
+    setPanelDrag(null);
   };
+
+  const toDropTarget = (
+    t: NonNullable<PanelLeafDragState["target"]>,
+  ): Parameters<typeof movePanelLeafNote>[2] =>
+    t.kind === "root"
+      ? { type: "root", insertBeforeMemberIndex: t.insertBeforeMemberIndex }
+      : { type: "nested", nestedId: t.nestedId, insertBeforeNoteIndex: t.insertBeforeNoteIndex };
 
   const handleListDrop = (e: React.DragEvent) => {
     // Always stop propagation so drops anywhere inside the panel never reach
     // the canvas drop handler — notes stay in the cluster if released here.
     e.stopPropagation();
-    if (
-      reorderDragIndex !== null &&
-      reorderOverIndex !== null &&
-      reorderDragIndex !== reorderOverIndex
-    ) {
-      const next = [...notes];
-      const [moved] = next.splice(reorderDragIndex, 1);
-      let insertAt = reorderOverIndex;
-      if (reorderDragIndex < reorderOverIndex) insertAt = reorderOverIndex - 1;
-      next.splice(insertAt, 0, moved);
-      onReorderNotes(next);
+    if (!panelDrag?.noteId) {
+      endGhost();
+      clearPanelDrag();
+      return;
     }
-    clearReorderDragState();
+    if (!panelDrag.target) {
+      endGhost();
+      clearPanelDrag();
+      return;
+    }
+    const next = movePanelLeafNote(notes, panelDrag.noteId, toDropTarget(panelDrag.target));
+    // Clear ghost before commit: cross-boundary reorder can unmount the drag handle
+    // before dragend, so onDragEndGhost never runs (same idea as clearGhostRef on canvas).
+    endGhost();
+    if (next !== notes) onReorderNotes(next);
+    clearPanelDrag();
   };
 
   const handleNestedListDrop = (e: React.DragEvent, nestedClusterId: string) => {
     e.stopPropagation();
-    if (!nestedReorder || nestedReorder.nestedClusterId !== nestedClusterId) {
-      clearReorderDragState();
+    if (!panelDrag?.noteId) {
+      endGhost();
+      clearPanelDrag();
       return;
     }
-    const { dragIndex, overIndex } = nestedReorder;
-    if (overIndex !== null && dragIndex !== overIndex) {
-      const next = reorderNotesWithinNestedCluster(notes, nestedClusterId, dragIndex, overIndex);
-      onReorderNotes(next);
+
+    let dest: Parameters<typeof movePanelLeafNote>[2];
+    if (panelDrag.target?.kind === "root") {
+      dest = toDropTarget(panelDrag.target);
+    } else if (panelDrag.target?.kind === "nested" && panelDrag.target.nestedId === nestedClusterId) {
+      dest = {
+        type: "nested",
+        nestedId: nestedClusterId,
+        insertBeforeNoteIndex: panelDrag.target.insertBeforeNoteIndex,
+      };
+    } else {
+      const block = notes.find((m) => isNestedClusterMember(m) && m.id === nestedClusterId);
+      dest = {
+        type: "nested",
+        nestedId: nestedClusterId,
+        insertBeforeNoteIndex:
+          block !== undefined && isNestedClusterMember(block) ? block.notes.length : 0,
+      };
     }
-    clearReorderDragState();
+
+    const next = movePanelLeafNote(notes, panelDrag.noteId, dest);
+    // Clear ghost before commit: cross-boundary reorder can unmount the drag handle
+    // before dragend, so onDragEndGhost never runs (same idea as clearGhostRef on canvas).
+    endGhost();
+    if (next !== notes) onReorderNotes(next);
+    clearPanelDrag();
   };
 
   const ghostPalette = NOTE_COLOR_META[ghostNote?.colorKey ?? DEFAULT_NOTE_COLOR];
@@ -339,12 +371,17 @@ export function ClusterPanel({
           ) : (
             <div className="space-y-2.5">
               {notes.map((member, i) => {
-                const showInsertLine =
-                  reorderDragIndex !== null &&
-                  reorderOverIndex === i &&
-                  reorderDragIndex !== i;
+                const showRootInsertBefore =
+                  panelDrag?.target?.kind === "root" &&
+                  panelDrag.target.insertBeforeMemberIndex === i &&
+                  !(panelDrag.source.kind === "root" && panelDrag.source.memberIndex === i);
 
                 if (isNestedClusterMember(member)) {
+                  const showNestedAppendLine =
+                    panelDrag?.target?.kind === "nested" &&
+                    panelDrag.target.nestedId === member.id &&
+                    panelDrag.target.insertBeforeNoteIndex === member.notes.length;
+
                   return (
                     <div
                       key={member.id}
@@ -363,13 +400,18 @@ export function ClusterPanel({
                         {member.notes.length === 1 ? "note" : "notes"}
                       </p>
                       {member.notes.map((note, j) => {
-                        const showNestedInsertLine =
-                          nestedReorder?.nestedClusterId === member.id &&
-                          nestedReorder.overIndex === j &&
-                          nestedReorder.dragIndex !== j;
+                        const showNestedInsertBefore =
+                          panelDrag?.target?.kind === "nested" &&
+                          panelDrag.target.nestedId === member.id &&
+                          panelDrag.target.insertBeforeNoteIndex === j &&
+                          !(
+                            panelDrag.source.kind === "nested" &&
+                            panelDrag.source.nestedId === member.id &&
+                            panelDrag.source.noteIndex === j
+                          );
                         return (
                           <div key={note.id}>
-                            {showNestedInsertLine && (
+                            {showNestedInsertBefore && (
                               <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
                             )}
                             <PanelNoteCard
@@ -381,21 +423,27 @@ export function ClusterPanel({
                               onEject={() => onEjectNote(note.id)}
                               onPushSnapshot={pushSnapshot}
                               onDragStartReorder={() => {
-                                setReorderDragIndex(null);
-                                setReorderOverIndex(null);
-                                setNestedReorder({
-                                  nestedClusterId: member.id,
-                                  dragIndex: j,
-                                  overIndex: null,
+                                setPanelDrag({
+                                  noteId: note.id,
+                                  source: { kind: "nested", nestedId: member.id, noteIndex: j },
+                                  target: null,
                                 });
                               }}
                               onDragEnterCard={() => {
-                                setNestedReorder((prev) => {
-                                  if (!prev || prev.nestedClusterId !== member.id) return prev;
-                                  return { ...prev, overIndex: j };
-                                });
+                                setPanelDrag((p) =>
+                                  p
+                                    ? {
+                                        ...p,
+                                        target: {
+                                          kind: "nested",
+                                          nestedId: member.id,
+                                          insertBeforeNoteIndex: j,
+                                        },
+                                      }
+                                    : null,
+                                );
                               }}
-                              onDragEndReorder={clearReorderDragState}
+                              onDragEndReorder={clearPanelDrag}
                               onDragStartGhost={(x, y) => startGhost(note, x, y)}
                               onDragMoveGhost={(x, y) => setGhostPos({ x, y })}
                               onDragEndGhost={endGhost}
@@ -403,6 +451,26 @@ export function ClusterPanel({
                           </div>
                         );
                       })}
+                      {showNestedAppendLine && (
+                        <div className="mx-1 h-0.5 rounded-full bg-indigo-400" />
+                      )}
+                      <div
+                        className="h-2 shrink-0"
+                        onDragEnter={() => {
+                          setPanelDrag((p) =>
+                            p
+                              ? {
+                                  ...p,
+                                  target: {
+                                    kind: "nested",
+                                    nestedId: member.id,
+                                    insertBeforeNoteIndex: member.notes.length,
+                                  },
+                                }
+                              : null,
+                          );
+                        }}
+                      />
                     </div>
                   );
                 }
@@ -410,7 +478,7 @@ export function ClusterPanel({
                 const note = member;
                 return (
                   <div key={note.id}>
-                    {showInsertLine && (
+                    {showRootInsertBefore && (
                       <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
                     )}
                     <PanelNoteCard
@@ -422,11 +490,20 @@ export function ClusterPanel({
                       onEject={() => onEjectNote(note.id)}
                       onPushSnapshot={pushSnapshot}
                       onDragStartReorder={() => {
-                        setNestedReorder(null);
-                        setReorderDragIndex(i);
+                        setPanelDrag({
+                          noteId: note.id,
+                          source: { kind: "root", memberIndex: i },
+                          target: null,
+                        });
                       }}
-                      onDragEnterCard={() => setReorderOverIndex(i)}
-                      onDragEndReorder={clearReorderDragState}
+                      onDragEnterCard={() => {
+                        setPanelDrag((p) =>
+                          p
+                            ? { ...p, target: { kind: "root", insertBeforeMemberIndex: i } }
+                            : null,
+                        );
+                      }}
+                      onDragEndReorder={clearPanelDrag}
                       onDragStartGhost={(x, y) => startGhost(note, x, y)}
                       onDragMoveGhost={(x, y) => setGhostPos({ x, y })}
                       onDragEndGhost={endGhost}
@@ -434,6 +511,20 @@ export function ClusterPanel({
                   </div>
                 );
               })}
+              {panelDrag?.target?.kind === "root" &&
+                panelDrag.target.insertBeforeMemberIndex === notes.length && (
+                  <div className="mx-1 h-0.5 rounded-full bg-indigo-400" />
+                )}
+              <div
+                className="h-3 shrink-0"
+                onDragEnter={() => {
+                  setPanelDrag((p) =>
+                    p
+                      ? { ...p, target: { kind: "root", insertBeforeMemberIndex: notes.length } }
+                      : null,
+                  );
+                }}
+              />
             </div>
           )}
         </div>
