@@ -39,7 +39,7 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 | **Palette** | **Eight** unified, high-contrast note colors with **light/dark** surfaces (no separate user “theme” pick); see `noteColors.ts`. |
 | **Search** | `Cmd/Ctrl+F` on the **active board** only: floating bar, cycling, pan/zoom-to-readable for the active hit, cluster panel integration, color-filter suspend while open. No cross-board search in v2. See [SPEC.md](./SPEC.md#search-v2). |
 | **Export** | **PNG:** current view + fit-all. **JSON:** versioned snapshot of **all boards in the workspace**; import **replaces** the in-memory workspace after confirmation (no merge in v2). Same envelope becomes the v3 desktop save file. See [SPEC.md — Export (v2)](./SPEC.md#export-v2). |
-| **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel shows children as **indented** rows; optional panel tree-DnD later. Deeper hierarchy → **nested corkboards (v3)**. |
+| **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel **indented** tree with **note DnD** (reorder and move between root and nested sections). Deeper hierarchy → **nested corkboards (v3)**. |
 | **Polish** | Small UX wins that don’t warrant their own row — track as individual GitHub issues. |
 
 ### Work items (living checklist)
@@ -53,7 +53,7 @@ Use this list for planning issues/PRs; reorder as priorities shift.
 - [x] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; default filename from board title + timestamp.  
 - [x] **Export / import JSON** — Versioned `{ version, exportedAt, boards[] }` for **all boards in the workspace**; file pick or drop; v2 conflict behavior **replace workspace** with explicit overwrite warning (manual project switch). **Implementation:** persistence uses split `localStorage` keys (`corkboard:boards` + per-board `corkboard:board:{id}`); the exporter must **gather every board** into one snapshot, not only the active board’s in-memory state. Same format = v3 save file per [SPEC.md](./SPEC.md#desktop-application-and-save-files-v3).  
 - [x] **Multi-select & bulk actions** — **Ctrl/Cmd+click** additive select; **Shift+drag** marquee (React Flow default). Toolbar **color / font / formatting / delete** applies to all selected canvas notes and clusters (clusters: cluster + inner notes for color/size/format). **Bulk cluster:** two or more selected **notes** combine into one cluster (edges remapped to anchor); single selected note still promotes. **Bulk move:** native multi-node drag + one undo snapshot on drag start. Pin-to-cluster / note-merge on drop is disabled when multiple canvas nodes are selected.  
-- [ ] **Nested clusters (max depth 1)** — Data model + canvas drop (cluster → cluster) + dialog (**Flatten** | **Nest** | **Cancel**); panel **indented** tree UI; enforce **no cluster inside a child cluster**. Optional: panel DnD as folder tree. Spec: [SPEC.md](./SPEC.md) *Nested clusters*.  
+- [x] **Nested clusters (max depth 1)** — Data model + canvas drop (cluster → cluster) + dialog (**Flatten** | **Nest** | **Cancel**); panel **indented** tree + note **DnD** (reorder within a nested block and between root / nested sections); enforce **no cluster inside a child cluster**. Spec: [SPEC.md](./SPEC.md) *Nested clusters*.  
 
 ### Polish & small UX (v2 backlog)
 
