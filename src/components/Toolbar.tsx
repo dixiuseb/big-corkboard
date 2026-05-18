@@ -140,8 +140,6 @@ type ToolbarProps = {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  searchOpen: boolean;
-  onOpenSearch: () => void;
   onClearBoard: () => void;
   // Note formatting — reflects the selected note's settings, or the running default.
   colorKey: NoteColorKey;
@@ -164,8 +162,6 @@ export function Toolbar({
   onRedo,
   canUndo,
   canRedo,
-  searchOpen,
-  onOpenSearch,
   onClearBoard,
   colorKey,
   formatting,
@@ -247,20 +243,6 @@ export function Toolbar({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M15 14l5-5-5-5" />
             <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          onClick={onOpenSearch}
-          title="Search notes (⌘F)"
-          aria-pressed={searchOpen}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white ${
-            searchOpen ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300" : ""
-          }`}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="6" />
-            <path d="m20 20-4.3-4.3" />
           </svg>
         </button>
 
