@@ -10,6 +10,7 @@ import {
 } from "@/lib/noteColors";
 import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
+import { exportBoardFlowPng, type BoardPngExportMode } from "@/lib/boardPngExport";
 
 function AboutMenu() {
   const linkClass =
@@ -126,6 +127,155 @@ function AboutMenu() {
   );
 }
 
+function FileMenu({ boardTitle }: { boardTitle: string }) {
+  const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
+  const [open, setOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    if (!open || !buttonRef.current) {
+      setPlacement(null);
+      return;
+    }
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPlacement({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    updatePlacement();
+  }, [updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => updatePlacement();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const runExport = useCallback(
+    async (mode: BoardPngExportMode) => {
+      const el = document.querySelector("[data-corkboard-react-flow]");
+      if (!(el instanceof HTMLElement)) {
+        window.alert("Could not find the canvas to export.");
+        return;
+      }
+      setExporting(true);
+      try {
+        await exportBoardFlowPng(el, boardTitle, mode, {
+          fitView,
+          getViewport,
+          setViewport,
+          getNodes,
+        });
+        setOpen(false);
+      } catch (e) {
+        console.error(e);
+        window.alert("PNG export failed. Try again, or close other overlays and retry.");
+      } finally {
+        setExporting(false);
+      }
+    },
+    [boardTitle, fitView, getViewport, setViewport, getNodes],
+  );
+
+  const menu =
+    open &&
+    placement &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        ref={menuRef}
+        role="menu"
+        style={{
+          position: "fixed",
+          top: placement.top,
+          right: placement.right,
+          zIndex: 10050,
+          width: "min(17rem, calc(100vw - 2rem))",
+        }}
+        className="rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+      >
+        <div className="border-b border-black/8 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:border-white/8 dark:text-white/40">
+          File
+        </div>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exporting}
+          onClick={() => void runExport("viewport")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (current view)…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exporting}
+          onClick={() => void runExport("fitAll")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (fit all notes)…
+        </button>
+        <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
+        <button
+          type="button"
+          role="menuitem"
+          disabled
+          title="Coming soon"
+          className="flex w-full cursor-not-allowed px-3 py-2 text-left text-black/35 dark:text-white/30"
+        >
+          Save as JSON…
+        </button>
+      </div>,
+      document.body,
+    );
+
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        disabled={exporting}
+        title="File menu — export and (soon) workspace backup"
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+      >
+        File
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {menu}
+    </div>
+  );
+}
+
 const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "sm", label: "S" },
   { key: "md", label: "M" },
@@ -142,6 +292,8 @@ type ToolbarProps = {
   canRedo: boolean;
   searchOpen: boolean;
   onOpenSearch: () => void;
+  /** Active board tab title — used in PNG export filenames. */
+  boardTitle: string;
   onClearBoard: () => void;
   // Note formatting — reflects the selected note's settings, or the running default.
   colorKey: NoteColorKey;
@@ -166,6 +318,7 @@ export function Toolbar({
   canRedo,
   searchOpen,
   onOpenSearch,
+  boardTitle,
   onClearBoard,
   colorKey,
   formatting,
@@ -407,7 +560,10 @@ export function Toolbar({
         </button>
         </div>
 
-        <AboutMenu />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FileMenu boardTitle={boardTitle} />
+          <AboutMenu />
+        </div>
       </div>
     </Panel>
   );

@@ -129,7 +129,7 @@ function SFPCapture({ sfpRef }: { sfpRef: React.MutableRefObject<SFPFn | null> }
 // Renders the React Flow canvas for a single board. Keyed by boardId in the
 // outer Board shell so React remounts it cleanly whenever the active board changes.
 
-function BoardCanvas({ boardId }: { boardId: string }) {
+function BoardCanvas({ boardId, boardTitle }: { boardId: string; boardTitle: string }) {
   const [savedState] = useState<PersistedBoardState | null>(() => loadBoardState(boardId));
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(
@@ -1015,6 +1015,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       >
         <div className="relative min-h-0 flex-1">
           <ReactFlow
+            data-corkboard-react-flow=""
             className="h-full w-full touch-manipulation"
             colorMode="system"
           nodes={nodes}
@@ -1046,6 +1047,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             canRedo={canRedo}
             searchOpen={searchOpen}
             onOpenSearch={openSearch}
+            boardTitle={boardTitle}
             onClearBoard={handleClearBoard}
             colorKey={toolbarColorKey}
             formatting={toolbarFormatting}
@@ -1228,7 +1230,11 @@ export function Board() {
   return (
     <div className="flex h-dvh w-full flex-col">
       <div className="min-h-0 flex-1">
-        <BoardCanvas key={activeId} boardId={activeId} />
+        <BoardCanvas
+          key={activeId}
+          boardId={activeId}
+          boardTitle={boards.find((b) => b.id === activeId)?.title ?? "Board"}
+        />
       </div>
       <BoardTabs
         boards={boards}
