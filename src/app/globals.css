@@ -48,3 +48,16 @@ body {
 .react-flow__edgelabel-renderer {
   z-index: 1002;
 }
+
+/* Hide React Flow’s dashed “group” rectangle around multi-selected nodes; each
+   node’s own selection ring is enough, and the group box reads like a stuck marquee. */
+.react-flow__nodesselection-rect {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+.react-flow__nodesselection-rect:focus,
+.react-flow__nodesselection-rect:focus-visible {
+  outline: none !important;
+}

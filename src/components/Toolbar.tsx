@@ -314,7 +314,11 @@ const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "xl", label: "XL" },
 ];
 
+export type CanvasTool = "pan" | "select";
+
 type ToolbarProps = {
+  canvasTool: CanvasTool;
+  onCanvasToolChange: (tool: CanvasTool) => void;
   connecting: boolean;
   onToggleConnecting: () => void;
   onUndo: () => void;
@@ -342,6 +346,8 @@ type ToolbarProps = {
 };
 
 export function Toolbar({
+  canvasTool,
+  onCanvasToolChange,
   connecting,
   onToggleConnecting,
   onUndo,
@@ -366,6 +372,29 @@ export function Toolbar({
 }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
+
+  /** Shift mirrors Select in the UI while Pan mode stays the stored tool. */
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const sync = (e: KeyboardEvent) => setShiftHeld(e.shiftKey);
+    const clear = () => setShiftHeld(false);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", sync);
+    window.addEventListener("keyup", sync);
+    window.addEventListener("blur", clear);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("keydown", sync);
+      window.removeEventListener("keyup", sync);
+      window.removeEventListener("blur", clear);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  const panLooksActive = canvasTool === "pan" && !shiftHeld;
+  const selectLooksActive = canvasTool === "select" || shiftHeld;
 
   const centrePosition = useCallback(
     () =>
@@ -522,10 +551,10 @@ export function Toolbar({
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
-        {/* Create cluster (canvas note only) */}
+        {/* Create cluster: one note → promote; multiple notes only → combine */}
         <button
           type="button"
-          title="Create cluster from selected note"
+          title="Cluster — turn one note into a cluster, or combine several selected notes (⌘/Ctrl-click to multi-select)"
           onClick={onCreateCluster}
           disabled={!canCreateCluster}
           className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -539,10 +568,10 @@ export function Toolbar({
           Cluster
         </button>
 
-        {/* Delete selected note */}
+        {/* Delete selected canvas nodes and/or panel note */}
         <button
           type="button"
-          title="Delete selected note"
+          title="Delete selected items"
           onClick={onDeleteSelected}
           disabled={!canDelete}
           className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/40 hover:bg-red-50 hover:text-red-500 dark:text-white/30 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -579,6 +608,35 @@ export function Toolbar({
           </svg>
           Connect
         </button>
+
+        <div className="flex overflow-hidden rounded-lg border border-black/15 dark:border-white/15">
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("pan")}
+            title="Pan — drag the canvas with the left mouse button (default)"
+            aria-pressed={panLooksActive}
+            className={`border-0 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              panLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Pan
+          </button>
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("select")}
+            title="Select — drag on empty canvas to select notes (same as Shift in Pan). Middle or right mouse still pans."
+            aria-pressed={selectLooksActive}
+            className={`border-0 border-l border-black/10 px-2.5 py-1.5 text-xs font-medium transition-colors dark:border-white/10 ${
+              selectLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Select
+          </button>
+        </div>
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
