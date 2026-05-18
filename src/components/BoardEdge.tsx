@@ -8,16 +8,7 @@ import {
   useReactFlow,
   type EdgeProps,
   type Edge,
-  type Node,
 } from "@xyflow/react";
-import { useCategoryFilter } from "@/lib/CategoryFilterContext";
-import {
-  noteColorMatchesFilter,
-  clusterNotesMatchFilter,
-} from "@/lib/categoryFilterMatch";
-import type { NoteColorKey } from "@/lib/noteColors";
-import type { NoteFlowNode } from "@/components/NoteCard";
-import type { ClusterFlowNode } from "@/components/ClusterNode";
 
 export type EdgeDirection = "none" | "forward" | "reverse" | "both";
 
@@ -29,22 +20,6 @@ export type BoardEdgeData = {
 export type BoardEdgeType = Edge<BoardEdgeData, "boardEdge">;
 
 const ARROW_SIZE = 10;
-
-function flowNodeMatchesCategoryFilter(
-  node: Node | undefined,
-  filter: NoteColorKey,
-): boolean {
-  if (!node) return false;
-  if (node.type === "noteCard") {
-    const n = node as NoteFlowNode;
-    return noteColorMatchesFilter(n.data.colorKey, filter);
-  }
-  if (node.type === "clusterNode") {
-    const c = node as ClusterFlowNode;
-    return clusterNotesMatchFilter(c.data.notes, c.data.colorKey, filter);
-  }
-  return false;
-}
 
 // Filled arrowhead triangle pointing from (fromX,fromY) toward (toX,toY); tip at (toX,toY).
 function arrowheadPath(fromX: number, fromY: number, toX: number, toY: number): string {
@@ -65,8 +40,6 @@ function shortenedEnd(fromX: number, fromY: number, toX: number, toY: number): [
 
 export function BoardEdge({
   id,
-  source,
-  target,
   sourceX,
   sourceY,
   targetX,
@@ -74,19 +47,13 @@ export function BoardEdge({
   data,
   selected,
 }: EdgeProps<BoardEdgeType>) {
-  const { updateEdgeData, getNode } = useReactFlow();
-  const categoryFilter = useCategoryFilter();
+  const { updateEdgeData } = useReactFlow();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(data?.label ?? "");
 
-  const edgeMatchesFilter =
-    categoryFilter === null ||
-    (flowNodeMatchesCategoryFilter(getNode(source), categoryFilter) &&
-      flowNodeMatchesCategoryFilter(getNode(target), categoryFilter));
 
   const stroke = selected ? "#818cf8" : "#64748b";
-  let opacity = selected ? 1 : 0.7;
-  if (categoryFilter !== null && !edgeMatchesFilter) opacity *= 0.38;
+  const opacity = selected ? 1 : 0.7;
   const direction = data?.direction ?? "none";
 
   const hasEnd   = direction === "forward" || direction === "both";
@@ -131,9 +98,8 @@ export function BoardEdge({
             position: "absolute",
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
             pointerEvents: "all",
-            opacity: categoryFilter !== null && !edgeMatchesFilter ? 0.38 : 1,
           }}
-          className="nodrag nopan transition-opacity"
+          className="nodrag nopan"
         >
           {editing ? (
             <input
