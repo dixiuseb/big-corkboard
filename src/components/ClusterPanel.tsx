@@ -5,7 +5,8 @@ import {
   NOTE_COLOR_META,
   DEFAULT_NOTE_COLOR,
 } from "@/lib/noteColors";
-import type { ClusterNoteItem } from "@/components/ClusterNode";
+import type { ClusterMember, ClusterNoteItem } from "@/lib/clusterMembers";
+import { isNestedClusterMember, reorderNotesWithinNestedCluster } from "@/lib/clusterMembers";
 import { useCategoryFilter } from "@/lib/CategoryFilterContext";
 import { noteColorMatchesFilter } from "@/lib/categoryFilterMatch";
 import { useSearchSession } from "@/lib/SearchContext";
@@ -13,7 +14,7 @@ import { useUndoContext } from "@/lib/UndoContext";
 
 type ClusterPanelProps = {
   clusterId: string;
-  notes: ClusterNoteItem[];
+  notes: ClusterMember[];
   onUpdateNote: (noteId: string, update: Partial<ClusterNoteItem>) => void;
   onDeleteNote: (noteId: string) => void;
   onEjectNote: (noteId: string) => void;
@@ -21,7 +22,7 @@ type ClusterPanelProps = {
   onClose: () => void;
   onDeleteCluster: () => void;
   onUncluster: () => void;
-  onReorderNotes: (reorderedNotes: ClusterNoteItem[]) => void;
+  onReorderNotes: (reorderedMembers: ClusterMember[]) => void;
   clearGhostRef?: React.MutableRefObject<() => void>;
   selectedNoteId: string | null;
   onSelectNote: (id: string | null) => void;
@@ -182,6 +183,12 @@ export function ClusterPanel({
   // ── Reorder drag state ────────────────────────────────────────────────────
   const [reorderDragIndex, setReorderDragIndex] = useState<number | null>(null);
   const [reorderOverIndex, setReorderOverIndex] = useState<number | null>(null);
+  /** Reorder drag for notes inside a nested cluster block (root list uses reorderDragIndex / reorderOverIndex). */
+  const [nestedReorder, setNestedReorder] = useState<{
+    nestedClusterId: string;
+    dragIndex: number;
+    overIndex: number | null;
+  } | null>(null);
 
   // ── Drag-out ghost state ──────────────────────────────────────────────────
   const [ghostNote, setGhostNote] = useState<ClusterNoteItem | null>(null);
@@ -225,9 +232,10 @@ export function ClusterPanel({
     if (clearGhostRef) clearGhostRef.current = endGhost;
   }, [clearGhostRef, endGhost]);
 
-  const handleReorderDragEnd = () => {
+  const clearReorderDragState = () => {
     setReorderDragIndex(null);
     setReorderOverIndex(null);
+    setNestedReorder(null);
   };
 
   const handleListDrop = (e: React.DragEvent) => {
@@ -241,10 +249,26 @@ export function ClusterPanel({
     ) {
       const next = [...notes];
       const [moved] = next.splice(reorderDragIndex, 1);
-      next.splice(reorderOverIndex, 0, moved);
+      let insertAt = reorderOverIndex;
+      if (reorderDragIndex < reorderOverIndex) insertAt = reorderOverIndex - 1;
+      next.splice(insertAt, 0, moved);
       onReorderNotes(next);
     }
-    handleReorderDragEnd();
+    clearReorderDragState();
+  };
+
+  const handleNestedListDrop = (e: React.DragEvent, nestedClusterId: string) => {
+    e.stopPropagation();
+    if (!nestedReorder || nestedReorder.nestedClusterId !== nestedClusterId) {
+      clearReorderDragState();
+      return;
+    }
+    const { dragIndex, overIndex } = nestedReorder;
+    if (overIndex !== null && dragIndex !== overIndex) {
+      const next = reorderNotesWithinNestedCluster(notes, nestedClusterId, dragIndex, overIndex);
+      onReorderNotes(next);
+    }
+    clearReorderDragState();
   };
 
   const ghostPalette = NOTE_COLOR_META[ghostNote?.colorKey ?? DEFAULT_NOTE_COLOR];
@@ -314,14 +338,78 @@ export function ClusterPanel({
             <p className="pt-8 text-center text-sm text-black/30 dark:text-white/30">No notes yet</p>
           ) : (
             <div className="space-y-2.5">
-              {notes.map((note, i) => {
+              {notes.map((member, i) => {
                 const showInsertLine =
                   reorderDragIndex !== null &&
                   reorderOverIndex === i &&
                   reorderDragIndex !== i;
+
+                if (isNestedClusterMember(member)) {
+                  return (
+                    <div
+                      key={member.id}
+                      className="space-y-2 border-l-2 border-indigo-400/50 pl-3 dark:border-indigo-400/35"
+                      onDragOver={(e) => {
+                        if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.dataTransfer.dropEffect = "move";
+                        }
+                      }}
+                      onDrop={(e) => handleNestedListDrop(e, member.id)}
+                    >
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-black/45 dark:text-white/45">
+                        Nested cluster · {member.notes.length}{" "}
+                        {member.notes.length === 1 ? "note" : "notes"}
+                      </p>
+                      {member.notes.map((note, j) => {
+                        const showNestedInsertLine =
+                          nestedReorder?.nestedClusterId === member.id &&
+                          nestedReorder.overIndex === j &&
+                          nestedReorder.dragIndex !== j;
+                        return (
+                          <div key={note.id}>
+                            {showNestedInsertLine && (
+                              <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
+                            )}
+                            <PanelNoteCard
+                              clusterId={clusterId}
+                              note={note}
+                              selected={selectedNoteId === note.id}
+                              onSelect={() => onSelectNote(note.id)}
+                              onUpdate={(update) => onUpdateNote(note.id, update)}
+                              onEject={() => onEjectNote(note.id)}
+                              onPushSnapshot={pushSnapshot}
+                              onDragStartReorder={() => {
+                                setReorderDragIndex(null);
+                                setReorderOverIndex(null);
+                                setNestedReorder({
+                                  nestedClusterId: member.id,
+                                  dragIndex: j,
+                                  overIndex: null,
+                                });
+                              }}
+                              onDragEnterCard={() => {
+                                setNestedReorder((prev) => {
+                                  if (!prev || prev.nestedClusterId !== member.id) return prev;
+                                  return { ...prev, overIndex: j };
+                                });
+                              }}
+                              onDragEndReorder={clearReorderDragState}
+                              onDragStartGhost={(x, y) => startGhost(note, x, y)}
+                              onDragMoveGhost={(x, y) => setGhostPos({ x, y })}
+                              onDragEndGhost={endGhost}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+
+                const note = member;
                 return (
                   <div key={note.id}>
-                    {/* Insertion indicator — appears above the drop-target card */}
                     {showInsertLine && (
                       <div className="mb-1.5 mx-1 h-0.5 rounded-full bg-indigo-400" />
                     )}
@@ -333,9 +421,12 @@ export function ClusterPanel({
                       onUpdate={(update) => onUpdateNote(note.id, update)}
                       onEject={() => onEjectNote(note.id)}
                       onPushSnapshot={pushSnapshot}
-                      onDragStartReorder={() => setReorderDragIndex(i)}
+                      onDragStartReorder={() => {
+                        setNestedReorder(null);
+                        setReorderDragIndex(i);
+                      }}
                       onDragEnterCard={() => setReorderOverIndex(i)}
-                      onDragEndReorder={handleReorderDragEnd}
+                      onDragEndReorder={clearReorderDragState}
                       onDragStartGhost={(x, y) => startGhost(note, x, y)}
                       onDragMoveGhost={(x, y) => setGhostPos({ x, y })}
                       onDragEndGhost={endGhost}

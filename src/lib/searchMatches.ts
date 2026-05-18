@@ -1,5 +1,10 @@
 import type { NoteFlowNode } from "@/components/NoteCard";
 import type { ClusterFlowNode } from "@/components/ClusterNode";
+import {
+  isNestedClusterMember,
+  normalizeClusterMembers,
+  type ClusterMember,
+} from "@/lib/clusterMembers";
 
 export type BoardSearchNode = NoteFlowNode | ClusterFlowNode;
 
@@ -25,9 +30,16 @@ export function buildSearchMatches(nodes: BoardSearchNode[], queryLower: string)
       }
     } else if (n.type === "clusterNode") {
       const c = n as ClusterFlowNode;
-      for (const note of c.data.notes ?? []) {
-        if (noteBodyMatchesCaseInsensitive(note.body ?? "", queryLower)) {
-          out.push({ kind: "cluster", clusterId: c.id, noteId: note.id });
+      const members: ClusterMember[] = normalizeClusterMembers(c.data.notes as unknown);
+      for (const m of members) {
+        if (isNestedClusterMember(m)) {
+          for (const note of m.notes) {
+            if (noteBodyMatchesCaseInsensitive(note.body ?? "", queryLower)) {
+              out.push({ kind: "cluster", clusterId: c.id, noteId: note.id });
+            }
+          }
+        } else if (noteBodyMatchesCaseInsensitive(m.body ?? "", queryLower)) {
+          out.push({ kind: "cluster", clusterId: c.id, noteId: m.id });
         }
       }
     }
