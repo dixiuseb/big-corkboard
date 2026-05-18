@@ -30,7 +30,7 @@ import ClusterNode, {
 } from "@/components/ClusterNode";
 import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/BoardEdge";
 import { ClusterPanel } from "@/components/ClusterPanel";
-import { Toolbar } from "@/components/Toolbar";
+import { Toolbar, type WorkspaceFileMenuActions } from "@/components/Toolbar";
 import { DEFAULT_NOTE_COLOR, type NoteColorKey } from "@/lib/noteColors";
 import { UndoContext } from "@/lib/UndoContext";
 import {
@@ -52,6 +52,12 @@ import { SearchContext, buildSearchSessionValue } from "@/lib/SearchContext";
 import { buildSearchMatches } from "@/lib/searchMatches";
 import { BoardSearchBar } from "@/components/BoardSearchBar";
 import { SearchMatchViewport } from "@/components/SearchMatchViewport";
+import {
+  downloadWorkspaceJson,
+  parseWorkspaceImportJson,
+  applyWorkspaceImport,
+  WORKSPACE_MAX_BOARDS,
+} from "@/lib/workspaceJson";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -129,7 +135,15 @@ function SFPCapture({ sfpRef }: { sfpRef: React.MutableRefObject<SFPFn | null> }
 // Renders the React Flow canvas for a single board. Keyed by boardId in the
 // outer Board shell so React remounts it cleanly whenever the active board changes.
 
-function BoardCanvas({ boardId, boardTitle }: { boardId: string; boardTitle: string }) {
+function BoardCanvas({
+  boardId,
+  boardTitle,
+  workspaceFile,
+}: {
+  boardId: string;
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
+}) {
   const [savedState] = useState<PersistedBoardState | null>(() => loadBoardState(boardId));
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(
@@ -1048,6 +1062,7 @@ function BoardCanvas({ boardId, boardTitle }: { boardId: string; boardTitle: str
             searchOpen={searchOpen}
             onOpenSearch={openSearch}
             boardTitle={boardTitle}
+            workspaceFile={workspaceFile}
             onClearBoard={handleClearBoard}
             colorKey={toolbarColorKey}
             formatting={toolbarFormatting}
@@ -1162,7 +1177,8 @@ function BoardCanvas({ boardId, boardTitle }: { boardId: string; boardTitle: str
 
 // ── Board (outer shell) ───────────────────────────────────────────────────────
 // Manages the list of boards, the active board, and the bottom tab bar.
-// Uses key={activeId} on BoardCanvas so React remounts the canvas cleanly on switch.
+// Uses `${activeId}-${canvasKeyNonce}` on BoardCanvas so React remounts when switching boards
+// or after a workspace JSON import (same tab id, new localStorage payload).
 
 export function Board() {
   const [boards, setBoards] = useState<BoardMeta[]>(() => {
@@ -1181,6 +1197,9 @@ export function Board() {
     return boards[0].id;
   });
 
+  const [canvasKeyNonce, setCanvasKeyNonce] = useState(0);
+  const importWorkspaceInputRef = useRef<HTMLInputElement>(null);
+
   const persistBoards = useCallback((next: BoardMeta[]) => {
     setBoards(next);
     saveBoardsMeta(next);
@@ -1192,7 +1211,7 @@ export function Board() {
   }, []);
 
   const handleAdd = useCallback(() => {
-    if (boards.length >= 8) return;
+    if (boards.length >= WORKSPACE_MAX_BOARDS) return;
     // Pick the lowest unused "Board N" number.
     const used = new Set(
       boards.map((b) => { const m = b.title.match(/^Board (\d+)$/); return m ? +m[1] : 0; }),
@@ -1227,13 +1246,99 @@ export function Board() {
     persistBoards(next);
   }, [persistBoards]);
 
+  const tryImportWorkspaceJsonText = useCallback((text: string) => {
+    if (
+      !window.confirm(
+        "Replace the entire workspace? All current boards and notes will be removed and replaced by this file. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    const parsed = parseWorkspaceImportJson(text);
+    if (!parsed.ok) {
+      window.alert(parsed.error);
+      return;
+    }
+    try {
+      const r = applyWorkspaceImport(parsed.doc);
+      setBoards(r.boards);
+      setActiveId(r.activeId);
+      setCanvasKeyNonce((n) => n + 1);
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not apply this workspace file.");
+    }
+  }, []);
+
+  const handleExportWorkspaceJson = useCallback(() => {
+    try {
+      downloadWorkspaceJson();
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not export the workspace.");
+    }
+  }, []);
+
+  const workspaceFile = useMemo<WorkspaceFileMenuActions>(
+    () => ({
+      onExportWorkspaceJson: handleExportWorkspaceJson,
+      onRequestImportWorkspaceJson: () => importWorkspaceInputRef.current?.click(),
+    }),
+    [handleExportWorkspaceJson],
+  );
+
+  const handleImportWorkspaceInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const text = await file.text();
+      tryImportWorkspaceJsonText(text);
+    },
+    [tryImportWorkspaceJsonText],
+  );
+
+  const handleWorkspaceDragOverCapture = useCallback((e: React.DragEvent) => {
+    if ([...e.dataTransfer.types].includes("Files")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+
+  const handleWorkspaceDropCapture = useCallback(
+    async (e: React.DragEvent) => {
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !file.name.toLowerCase().endsWith(".json")) return;
+      if ([...e.dataTransfer.types].includes("application/x-corkboard-note")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const text = await file.text();
+      tryImportWorkspaceJsonText(text);
+    },
+    [tryImportWorkspaceJsonText],
+  );
+
   return (
-    <div className="flex h-dvh w-full flex-col">
+    <div
+      className="flex h-dvh w-full flex-col"
+      onDragOverCapture={handleWorkspaceDragOverCapture}
+      onDropCapture={handleWorkspaceDropCapture}
+    >
+      <input
+        ref={importWorkspaceInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="sr-only"
+        aria-hidden
+        tabIndex={-1}
+        onChange={handleImportWorkspaceInputChange}
+      />
       <div className="min-h-0 flex-1">
         <BoardCanvas
-          key={activeId}
+          key={`${activeId}-${canvasKeyNonce}`}
           boardId={activeId}
           boardTitle={boards.find((b) => b.id === activeId)?.title ?? "Board"}
+          workspaceFile={workspaceFile}
         />
       </div>
       <BoardTabs

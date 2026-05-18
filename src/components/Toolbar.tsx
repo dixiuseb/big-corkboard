@@ -12,6 +12,11 @@ import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
 import { exportBoardFlowPng, type BoardPngExportMode } from "@/lib/boardPngExport";
 
+export type WorkspaceFileMenuActions = {
+  onExportWorkspaceJson: () => void;
+  onRequestImportWorkspaceJson: () => void;
+};
+
 function AboutMenu() {
   const linkClass =
     "text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400";
@@ -127,10 +132,16 @@ function AboutMenu() {
   );
 }
 
-function FileMenu({ boardTitle }: { boardTitle: string }) {
+function FileMenu({
+  boardTitle,
+  workspaceFile,
+}: {
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
+}) {
   const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
   const [open, setOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exportingPng, setExportingPng] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
@@ -183,7 +194,7 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         window.alert("Could not find the canvas to export.");
         return;
       }
-      setExporting(true);
+      setExportingPng(true);
       try {
         await exportBoardFlowPng(el, boardTitle, mode, {
           fitView,
@@ -196,7 +207,7 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         console.error(e);
         window.alert("PNG export failed. Try again, or close other overlays and retry.");
       } finally {
-        setExporting(false);
+        setExportingPng(false);
       }
     },
     [boardTitle, fitView, getViewport, setViewport, getNodes],
@@ -215,7 +226,7 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
           top: placement.top,
           right: placement.right,
           zIndex: 10050,
-          width: "min(17rem, calc(100vw - 2rem))",
+          width: "min(20rem, calc(100vw - 2rem))",
         }}
         className="rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
       >
@@ -225,7 +236,7 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         <button
           type="button"
           role="menuitem"
-          disabled={exporting}
+          disabled={exportingPng}
           onClick={() => void runExport("viewport")}
           className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
         >
@@ -234,7 +245,7 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         <button
           type="button"
           role="menuitem"
-          disabled={exporting}
+          disabled={exportingPng}
           onClick={() => void runExport("fitAll")}
           className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
         >
@@ -244,11 +255,31 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         <button
           type="button"
           role="menuitem"
-          disabled
-          title="Coming soon"
-          className="flex w-full cursor-not-allowed px-3 py-2 text-left text-black/35 dark:text-white/30"
+          disabled={exportingPng}
+          onClick={() => {
+            try {
+              workspaceFile.onExportWorkspaceJson();
+              setOpen(false);
+            } catch (e) {
+              console.error(e);
+              window.alert("Could not export the workspace.");
+            }
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
         >
-          Save as JSON…
+          Export workspace as JSON…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => {
+            setOpen(false);
+            workspaceFile.onRequestImportWorkspaceJson();
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Import workspace…
         </button>
       </div>,
       document.body,
@@ -262,8 +293,8 @@ function FileMenu({ boardTitle }: { boardTitle: string }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        disabled={exporting}
-        title="File menu — export and (soon) workspace backup"
+        disabled={exportingPng}
+        title="File — export PNG, backup workspace JSON, import workspace"
         className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
       >
         File
@@ -294,6 +325,7 @@ type ToolbarProps = {
   onOpenSearch: () => void;
   /** Active board tab title — used in PNG export filenames. */
   boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
   onClearBoard: () => void;
   // Note formatting — reflects the selected note's settings, or the running default.
   colorKey: NoteColorKey;
@@ -319,6 +351,7 @@ export function Toolbar({
   searchOpen,
   onOpenSearch,
   boardTitle,
+  workspaceFile,
   onClearBoard,
   colorKey,
   formatting,
@@ -561,7 +594,7 @@ export function Toolbar({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <FileMenu boardTitle={boardTitle} />
+          <FileMenu boardTitle={boardTitle} workspaceFile={workspaceFile} />
           <AboutMenu />
         </div>
       </div>
