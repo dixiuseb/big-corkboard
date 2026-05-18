@@ -9,10 +9,19 @@ This document is the **technical and product design spec** for contributors, age
 - **Capture ideas where they land.** Notes and clusters coexist anywhere on the board; nothing forces a folder tree mindset.
 - **Feel like a real corkboard.** Stacked cards, color at a glance, optional connections that stay unobtrusive until you need them.
 - **Ship in focused versions** — v1 leaned on React Flow for pan/zoom/drag/connect and prioritized note UX, clusters, and local persistence; v2 adds search, export, and category polish without a backend ([roadmap](./ROADMAP.md)).
+- **Desktop-first from v3 onward** — the primary product is a local save-file workspace on disk (packaged with **Tauri**); the public web build stays useful as a demo and fallback with browser storage and JSON portability. Optional **personal** cloud sync is explicitly **v4+**, not a gate for desktop shipping.
 
 ## Mental model
 
-One infinite canvas: **standalone notecards** and **expandable cluster-nodes** can live side by side. Connections between items are optional. State is persisted locally first; the data shape should allow **remote sync (e.g. Supabase)** as a later addition without a rewrite.
+One infinite canvas: **standalone notecards** and **expandable cluster-nodes** can live side by side. Connections between items are optional.
+
+### Workspaces vs boards
+
+The **board tabs** in the UI (up to eight per session) are all part of a single **workspace** — one project or creative context (e.g. one novel, one screenplay). That boundary is intentional.
+
+Switching between **unrelated** projects is **not** “another tab”: it is a **workspace** change. v2 **JSON export/import** carries the whole workspace so users can move projects manually; v3 **save files** map one workspace ↔ one file on disk. Preserve this distinction in persistence, export, and any future sync UX.
+
+State is persisted **locally first**; the on-disk / export JSON shape is versioned so optional cross-device sync (v4+) can layer on without rewriting the core model.
 
 ## Data model
 
@@ -74,7 +83,7 @@ Board canvas state and the boards list are **persisted separately** in `localSto
 - `corkboard:boards` — ordered array of `{ id, title }` (the tab list)
 - `corkboard:board:{id}` — full canvas state for each board
 
-This way the tab list can be loaded instantly without deserializing every board’s nodes.
+This way the tab list can be loaded instantly without deserializing every board’s nodes. **Workspace JSON export** must still read **every** `corkboard:board:{id}` (plus `corkboard:boards`) into one file — see [Export (v2) — JSON](#export-v2).
 
 ## Tech stack
 
@@ -83,7 +92,7 @@ This way the tab list can be loaded instantly without deserializing every board�
 | Framework   | Next.js (App Router) | Same stack as the author’s portfolio; good default for deployment and hiring signal. |
 | Canvas      | [React Flow](https://reactflow.dev/) (`@xyflow/react`) | Purpose-built for node-based canvases; pan, zoom, drag, and edges are solved problems. |
 | Styling     | Tailwind CSS  | Fast iteration and consistent UI. |
-| Persistence | localStorage (v1) | Simple reload survival; migrate to sync when ready. |
+| Persistence | localStorage (web, v1–v2); workspace file on disk (v3 desktop) | Browser storage for the demo web app; **Tauri**-wrapped desktop uses a single save file per workspace with debounced auto-save. Optional cloud sync deferred to v4+ ([Desktop application and save files (v3)](#desktop-application-and-save-files-v3)). |
 
 ## Design decisions
 
@@ -183,7 +192,13 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 - **First load** with no data: create **“Board 1”**.
 - **Clear board** (toolbar): confirm, then wipe nodes, edges, and viewport for the **current** tab only — not the tab itself.
 
+**Web build (through v3+):** continues to use `localStorage` as today. Copy in the product should frame this honestly (e.g. data lives in the browser; export regularly for backup).
+
+**Desktop (v3+):** same debounce idea, writing to a **workspace save file** (see [Desktop application and save files (v3)](#desktop-application-and-save-files-v3)).
+
 ### Multiple boards
+
+Together, the open tabs are one **workspace** (see [Workspaces vs boards](#workspaces-vs-boards)).
 
 - **Tabs** along the bottom; max **8** boards; “+” hidden at the limit.
 - **Rename**: double-click tab title.
@@ -272,9 +287,79 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 
 ### Export (v2)
 
-- **PNG**: rasterize the canvas (`html-to-image` or similar); options for “current view” vs “fit all”; default filename from board title.
-- **JSON**: download `nodes`, `edges`, `viewport` as backup / interchange.
-- No PDF or shareable link in v2 (shareable links need cloud backend, v3+).
+Local-only; **no backend**.
+
+#### PNG
+
+- Rasterize the canvas (`html-to-image` or equivalent).
+- Two modes: **current view** (viewport as-is) and **fit all** (zoom to fit every node, then capture). **Fit all** is the primary shareable “whole board” artifact.
+- Default filename: **board title + timestamp** (per mode as needed).
+
+#### JSON export / import
+
+- **Scope:** the **entire current workspace** — all boards in the tab list, not only the active board — so the file is a complete project snapshot.
+- **Web / localStorage:** Board list and per-board bodies are stored **separately** (`corkboard:boards` vs `corkboard:board:{id}`) so the UI can load the tab strip without deserializing every board ([Data model](#data-model)). The JSON exporter **must** deliberately **assemble** the snapshot from **all** of those keys (ordered tab list + each board’s full payload), not from the active board’s in-memory React Flow state alone. Skipping this would silently drop boards the user is not currently viewing.
+- **Schema (versioned from day one):** `{ version, exportedAt, boards: BoardState[] }` where each entry is the full persisted state for one board (nodes, edges, viewport, `colorLabels`, titles / ids as in app storage). Forward-compatible import depends on bumping `version` when the shape changes.
+- **Import:** file picker or drop onto the app.
+- **Conflict behavior (v2):** **replace workspace** — no merge. Warn clearly before overwrite. This is the intentional primitive for **manual project switching**: export → fresh session → import.
+
+#### Out of scope for v2
+
+- No PDF.
+- No shareable link (that implies hosted infrastructure; see v4+ if ever added).
+
+### Desktop application and save files (v3)
+
+Big Corkboard’s **primary target platform from v3 onward** is a **desktop application**. The web build at **bigcorkboard.com** remains a **demo**, acquisition surface, and **fallback** — not the main experience.
+
+#### Rationale
+
+- Infinite canvas + keyboard-heavy workflow fits **focused desktop sessions** and a **pointer** better than a casual browser tab.
+- **Offline-first** is required: the tool must work with no network.
+- **“Your data is yours”** — a workspace as a file on disk is the clearest expression of ownership.
+- Desktop packaging avoids **browser storage fragility** (`localStorage` is one “clear site data” away from loss).
+
+#### Implementation path
+
+- **Tauri** is the preferred wrapper (Rust-backed, smaller binary than Electron, reuse of the existing Next.js / React UI).
+- **Electron** is an acceptable fallback if Tauri + Next integration is too painful.
+- **Capacitor / phone** — not a v3 driver; see [Mobile](#mobile).
+
+#### Save file model
+
+- One **workspace** ↔ one save file (e.g. `.corkboard`, JSON inside).
+- Shell actions: **New workspace**, **Open** (file picker), **Save**, **Save as**, plus a **recent workspaces** list on launch.
+- **Auto-save** on change (debounced), same spirit as today’s `localStorage` debounce — target is the filesystem instead.
+- The **v2 JSON export document** *is* the save-file format — **no separate ad-hoc schema** for disk.
+
+#### Web build (v3+)
+
+- Still **`localStorage`** + the same in-app UX as today.
+- **JSON export/import** remains the portability and backup escape hatch.
+- **No cloud sync** on the web build in v3; messaging should encourage regular export for backup.
+
+### Optional personal cloud sync (v4+)
+
+Sync is **explicitly deferred** past the v3 desktop release. When built, it is **personal sync across the user’s own devices**, not collaboration.
+
+#### Rationale
+
+- Desktop save files already satisfy offline use and data ownership.
+- Auth + storage + conflict policy is substantial scope and should not block shipping the desktop app.
+- **Collaboration** (shared workspaces, real-time co-editing) is a **separate, larger track** — not bundled with solo sync.
+
+#### When implemented (sketch)
+
+- **Model:** **last-write-wins per workspace**, with per-device timestamps — appropriate for solo use.
+- **Backend:** **Supabase** (auth + storage) unless superseded by a later decision.
+- **Opt-in:** full offline use without an account; sync is an add-on layer.
+- **Collaboration:** v4+ as its own feature set, not part of the first sync milestone.
+
+### Mobile
+
+- **Phone:** not a target. The interaction model (infinite canvas, drag, keyboard shortcuts) does not fit small touch screens.
+- **Tablet (e.g. iPad):** desirable long-term; **Capacitor** (or similar) is a likely path, **after** v3 desktop ships.
+- **Product constraint:** no mobile-specific architecture requirements should compromise the v3 desktop save-file design.
 
 ### Image nodes (v3)
 
@@ -283,7 +368,7 @@ Images are **first-class canvas objects** — an `imageNode` type with the same 
 - **Adding**: file drop on canvas or paste when canvas is focused and no note is editing.
 - **Resizing**: horizontal resize control (same idea as notes).
 - **Selection UI**: color/tint, caption, delete — no rich body text.
-- **Storage**: blobs don’t live in `localStorage`; **IndexedDB** keyed by UUID in local mode; with sync, **Supabase Storage** and URLs in JSON.
+- **Storage**: blobs don’t live in `localStorage`; **IndexedDB** in the web build; in the **v3 desktop** app, bundle or reference blobs in a way consistent with the workspace save file; **Supabase Storage** (or equivalent) only if **v4+** optional sync is enabled.
 
 Data sketch:
 
@@ -292,7 +377,7 @@ type ImageNode = {
   id: string
   type: 'image'
   colorKey: Color       // border/frame tint for category
-  imageRef: string      // UUID → IndexedDB (local) or Storage URL (cloud)
+  imageRef: string      // UUID → IndexedDB (web) | embedded in workspace file (desktop) | remote URL if v4+ sync
   caption?: string
   position: { x: number; y: number }
   width: number         // user-resizable
@@ -300,28 +385,6 @@ type ImageNode = {
 ```
 
 Clusters could later hold `NoteCard | ImageNode` (model evolution: e.g. `items` instead of `notes`).
-
-### Cloud sync (v3)
-
-Single-user sync via **Supabase**.
-
-- **Auth**: magic link + Google OAuth. Local-only mode remains fully usable without an account.
-- **Data flow**: `localStorage` stays the offline source of truth; on sign-in, boards sync up. **Conflict handling** for solo v3: last-write-wins per board (simplest).
-- **Schema** (sketch): `boards`, `nodes` (JSONB `data`), `edges`, Storage for image blobs.
-- **Realtime / share links**: v4, not v3.
-
-### Mobile (v3, alongside cloud sync)
-
-Wrap the web app with **[Capacitor](https://capacitorjs.com/)** for iOS and Android; static export of the Next app in a native shell.
-
-Touch / native concerns:
-
-- **Keyboard avoidance** — `KeyboardPlugin` + offset so `textarea` isn’t hidden.
-- **Safe areas** — `env(safe-area-inset-*)` on toolbar and tab bar.
-- **Haptics** — light feedback on drop / cluster create where appropriate.
-- **Pinch zoom** — React Flow; tune `minZoom` / `maxZoom` for touch.
-- **Connection mode** — tap-friendly because handles show in that mode.
-- **Network** — gate sync when offline (`Network` plugin).
 
 ---
 
