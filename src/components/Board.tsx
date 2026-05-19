@@ -78,6 +78,7 @@ import {
   type ClusterNestedMember,
 } from "@/lib/clusterMembers";
 import { DEFAULT_NOTE_WIDTH, resolveClusterOuterSize, resolveNoteHeight, resolveNoteWidth } from "@/lib/noteDimensions";
+import { resolveNoteFitDimensions } from "@/lib/noteFitDimensions";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
@@ -1052,6 +1053,50 @@ function BoardCanvas({
     [selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote],
   );
 
+  const handleToolbarResizeToFit = useCallback(() => {
+    const hasCanvas = nodesRef.current.some(
+      (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+    );
+    if (hasCanvas) {
+      pushSnapshot();
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (!n.selected) return n;
+          if (n.type === "noteCard") {
+            const fit = resolveNoteFitDimensions(n.data.body, n.data.formatting, n.data);
+            return { ...n, data: { ...n.data, width: fit.width, height: fit.height } };
+          }
+          if (n.type === "clusterNode") {
+            const c = n as ClusterFlowNode;
+            const members = normalizeClusterMembers(c.data.notes as unknown);
+            const front = firstLeafNote(members);
+            if (!front) return c;
+            const fit = resolveNoteFitDimensions(front.body, front.formatting, front);
+            return {
+              ...c,
+              data: {
+                ...c.data,
+                notes: updateLeafNoteInMembers(members, front.id, {
+                  width: fit.width,
+                  height: fit.height,
+                }),
+              },
+            };
+          }
+          return n;
+        }) as BoardNode[],
+      );
+    } else if (selectedPanelNote) {
+      pushSnapshot();
+      const fit = resolveNoteFitDimensions(
+        selectedPanelNote.body,
+        selectedPanelNote.formatting,
+        selectedPanelNote,
+      );
+      handleUpdateNote(selectedPanelNote.id, { width: fit.width, height: fit.height });
+    }
+  }, [selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+
   const handleToolbarDelete = useCallback(() => {
     const ids = new Set(
       nodesRef.current
@@ -1710,6 +1755,8 @@ function BoardCanvas({
             onToggleFormat={handleToolbarToggleFormat}
             canCreateCluster={canCreateCluster}
             onCreateCluster={handleToolbarCreateCluster}
+            canResizeToFit={!!(selectedCanvasNodes.length > 0 || selectedPanelNote)}
+            onResizeToFit={handleToolbarResizeToFit}
             canDelete={!!(selectedCanvasNodes.length > 0 || selectedPanelNote)}
             onDeleteSelected={handleToolbarDelete}
             defaultColorKey={defaultSettings.colorKey}
