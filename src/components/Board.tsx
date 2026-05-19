@@ -76,8 +76,28 @@ import {
   type ClusterMember,
   type ClusterNestedMember,
 } from "@/lib/clusterMembers";
+import { DEFAULT_NOTE_WIDTH, resolveNoteHeight, resolveNoteWidth } from "@/lib/noteDimensions";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
+
+const CLUSTER_NODE_FALLBACK = { w: 240, h: 160 };
+
+function boardNodeSize(n: BoardNode | Node): { w: number; h: number } {
+  if (n.type === "clusterNode") {
+    return {
+      w: n.measured?.width ?? CLUSTER_NODE_FALLBACK.w,
+      h: n.measured?.height ?? CLUSTER_NODE_FALLBACK.h,
+    };
+  }
+  if (n.type === "noteCard") {
+    const note = n as NoteFlowNode;
+    return {
+      w: n.measured?.width ?? resolveNoteWidth(note.data),
+      h: n.measured?.height ?? resolveNoteHeight(note.data),
+    };
+  }
+  return { w: 240, h: 120 };
+}
 
 type ContextMenu = { edgeId: string; x: number; y: number };
 
@@ -1156,10 +1176,7 @@ function BoardCanvas({
 
     if (draggedNode.type !== "noteCard" && draggedNode.type !== "clusterNode") return;
 
-    const w = draggedNode.measured?.width ?? 240;
-    const h =
-      draggedNode.measured?.height ??
-      (draggedNode.type === "clusterNode" ? 160 : 120);
+    const { w, h } = boardNodeSize(draggedNode);
     const center: XYPosition = {
       x: draggedNode.position.x + w / 2,
       y: draggedNode.position.y + h / 2,
@@ -1169,8 +1186,7 @@ function BoardCanvas({
     for (const n of nodesRef.current) {
       if (n.id === draggedNode.id) continue;
       if (n.type !== "clusterNode" && n.type !== "noteCard") continue;
-      const nw = n.measured?.width ?? 240;
-      const nh = n.measured?.height ?? (n.type === "clusterNode" ? 160 : 120);
+      const { w: nw, h: nh } = boardNodeSize(n);
       if (
         center.x >= n.position.x &&
         center.x <= n.position.x + nw &&
@@ -1339,7 +1355,8 @@ function BoardCanvas({
     // Convert the screen drop position to flow canvas coordinates.
     // Offset so the note is centred horizontally and anchored near the cursor.
     const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
-    const position: XYPosition = { x: canvasPos.x - 120, y: canvasPos.y - 20 };
+    const ejectWidth = DEFAULT_NOTE_WIDTH;
+    const position: XYPosition = { x: canvasPos.x - ejectWidth / 2, y: canvasPos.y - 20 };
 
     const newNote: NoteFlowNode = {
       id: crypto.randomUUID(),

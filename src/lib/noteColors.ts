@@ -103,6 +103,13 @@ export const NOTE_COLOR_META: Record<
 
 export const DEFAULT_NOTE_COLOR: NoteColorKey = "iris";
 
+/** Light/dark handle fill hex parsed from a note `handleClass` (for scrollbar styling). */
+export function parseHandleFillColors(handleClass: string): { light: string; dark: string } {
+  const light = handleClass.match(/!bg-\[(#[^\]]+)\]/i)?.[1];
+  const dark = handleClass.match(/dark:!bg-\[(#[^\]]+)\]/i)?.[1];
+  return { light: light ?? "#64748b", dark: dark ?? light ?? "#94a3b8" };
+}
+
 /** v1 six-color keys → current palette (localStorage migration). */
 export const LEGACY_NOTE_COLOR_KEY_MAP: Record<string, NoteColorKey> = {
   amber: "marigold",

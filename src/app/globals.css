@@ -61,3 +61,11 @@ body {
 .react-flow__nodesselection-rect:focus-visible {
   outline: none !important;
 }
+
+/* ── Note card scrollbars ─────────────────────────────────────────────────── */
+/* Structural only — thumb color is scoped per note via handleClass hex in NoteCard. */
+.note-card-scroll {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: transparent;
+}
