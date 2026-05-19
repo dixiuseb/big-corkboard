@@ -106,6 +106,7 @@ This way the tab list can be loaded instantly without deserializing every board�
 - **Delete shortcut**: `Delete` when a note is selected and not in edit mode. `Backspace` is reserved for text editing.
 - **Connection handles**: in **connection mode**, handles are visible on notes/clusters; otherwise they stay subtle / hover-oriented per product polish. Handles use each note’s color, not generic black dots.
 - **Resize (v2)**: selected canvas notes expose a **bottom-right drag handle** that sets **width** and **height** (clamped min/max, persisted on the node). Overflow scrolls inside the card.
+- **Resize to fit (v2)**: toolbar **Fit** sets **height** to the note body at the **current width** (grow or shrink; floor = default height). **Empty** body resets to default width and height. Applies to selected canvas notes (bulk), selected clusters (**top inner note** only), and the selected panel note. One undo step. See [Default note sizing mode (open)](#default-note-sizing-mode-open) for a future global auto-grow preference.
 
 ### Clusters
 
@@ -118,7 +119,7 @@ This way the tab list can be loaded instantly without deserializing every board�
   - 3+ notes → 3 cards stacked (capped visually at 3)
 - **Front card content**: the first note’s text verbatim (including its **formatting**). Users who want a cluster label make the first note a short title card.
 - **Front card size**: the collapsed cluster’s width and preview body height follow the **first note in member order** (the same note as the front card). Each inner note may store its own optional `width` / `height`; reordering in the panel updates the canvas cluster to match the new top note’s dimensions.
-- **Resize (v2)**: selected clusters expose the same **bottom-right resize handle** as notes. Dragging resizes **only the top inner note** (not every note in the cluster). Other inner notes keep their stored sizes for when they move to the front.
+- **Resize (v2)**: selected clusters expose the same **bottom-right resize handle** as notes. Dragging resizes **only the top inner note** (not every note in the cluster). Other inner notes keep their stored sizes for when they move to the front. Toolbar **Fit** uses the same top-note rule.
 - **Expanding**: expand control on the cluster node opens the **side panel**; the cluster node stays on the canvas.
 - **Side panel**:
   - Scrollable list of notes as editable cards.
@@ -137,6 +138,16 @@ This way the tab list can be loaded instantly without deserializing every board�
 - **Eight theme-aware note colors** — each key has a **light-mode** surface (brighter bg, dark body text) and a **dark-mode** surface (deeper bg, light body text), driven by `prefers-color-scheme` / Tailwind `dark:`. Handles and selection rings use a stronger **label** tint per color (see `src/lib/noteColors.ts`).
 - **Semantic use** (e.g. characters vs scenes vs themes) makes the board scannable at a glance.
 - Notes inside a cluster can be mixed colors; the panel shows each card’s own color.
+
+#### Default note sizing mode (open)
+
+v2 defaults to **fixed** cards: implicit default size, scroll when content overflows, manual resize or **Fit** to change dimensions. Some users prefer **auto-grow** (height follows content as they type, min = default). Deferred to **app preferences (v3+)**:
+
+- Global default for **new** notes: fixed vs auto-grow.
+- Per-note override after **manual resize** (fixed until changed again).
+- Optional bulk “apply mode to board” is a separate product decision.
+
+See [ROADMAP.md — Open questions](./ROADMAP.md#open-questions-defer--revisit-before-big-ui-changes).
 
 #### Light and dark mode
 

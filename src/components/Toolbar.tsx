@@ -349,6 +349,8 @@ type ToolbarProps = {
   // Contextual actions — enabled only when a note is selected.
   canCreateCluster: boolean;
   onCreateCluster: () => void;
+  canResizeToFit: boolean;
+  onResizeToFit: () => void;
   canDelete: boolean;
   onDeleteSelected: () => void;
 };
@@ -375,6 +377,8 @@ export function Toolbar({
   onToggleFormat,
   canCreateCluster,
   onCreateCluster,
+  canResizeToFit,
+  onResizeToFit,
   canDelete,
   onDeleteSelected,
 }: ToolbarProps) {
@@ -698,6 +702,22 @@ export function Toolbar({
         ))}
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+
+        {/* Resize to fit — height to content at current width; empty → default size */}
+        <button
+          type="button"
+          title="Resize to fit content (height; min default size)"
+          onClick={onResizeToFit}
+          disabled={!canResizeToFit}
+          className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 5v14" />
+            <path d="m8 9 4-4 4 4" />
+            <path d="m8 15 4 4 4-4" />
+          </svg>
+          Fit
+        </button>
 
         {/* Create cluster: one note → promote; multiple notes only → combine */}
         <button
