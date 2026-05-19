@@ -60,7 +60,7 @@ Use this list for planning issues/PRs; reorder as priorities shift.
 Smaller wins; link GitHub issues inline when you have them (e.g. `(#123)`).
 
 - [x] **Note resize** — Bottom-right drag handle on selected canvas notes sets **width/height** (clamped min/max, persisted on `noteCard`); overflow uses a **label-tinted custom scroll rail** (draggable, Safari-safe). [#25](https://github.com/dixiuseb/big-corkboard/issues/25)
-- [ ] **Drag-to-place new note** — Click-drag from **Add note** to spawn a card at drop position (ghost while dragging, cancel if released off-canvas). Moderate interaction work but still **client-only**; low priority vs larger v2 items — **not** inherently a v3 feature unless you batch it with unrelated work. [#26](https://github.com/dixiuseb/big-corkboard/issues/26)
+- [x] **Drag-to-place new note / cluster** — Click-drag from **Add note** or **Add cluster** to spawn at drop position (ghost while dragging, cancel if released off-canvas); click still adds at viewport center. [#26](https://github.com/dixiuseb/big-corkboard/issues/26)
 
 Planned v2 **search / export / categories / palette** detail: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions or inline here if you want a single index.
 

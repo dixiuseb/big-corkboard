@@ -8,6 +8,7 @@ import {
   NOTE_COLOR_KEYS,
   NOTE_COLOR_META,
 } from "@/lib/noteColors";
+import { DEFAULT_NOTE_HEIGHT, DEFAULT_NOTE_WIDTH } from "@/lib/noteDimensions";
 import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
 import { exportBoardFlowPng, type BoardPngExportMode } from "@/lib/boardPngExport";
@@ -314,6 +315,13 @@ const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "xl", label: "XL" },
 ];
 
+const EMPTY_DRAG_IMAGE =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+/** Matches collapsed cluster node footprint on canvas (see Board.tsx). */
+const CLUSTER_GHOST_WIDTH = 240;
+const CLUSTER_GHOST_HEIGHT = 160;
+
 export type CanvasTool = "pan" | "select";
 
 type ToolbarProps = {
@@ -373,6 +381,11 @@ export function Toolbar({
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
 
+  const [placeNoteGhost, setPlaceNoteGhost] = useState<{ x: number; y: number } | null>(null);
+  const [placeClusterGhost, setPlaceClusterGhost] = useState<{ x: number; y: number } | null>(null);
+  const suppressAddNoteClickRef = useRef(false);
+  const suppressAddClusterClickRef = useRef(false);
+
   /** Shift mirrors Select in the UI while Pan mode stays the stored tool. */
   const [shiftHeld, setShiftHeld] = useState(false);
   useEffect(() => {
@@ -415,6 +428,48 @@ export function Toolbar({
     });
   }, [addNodes, centrePosition, pushSnapshot, colorKey, formatting]);
 
+  const onAddNoteClick = useCallback(() => {
+    if (suppressAddNoteClickRef.current) {
+      suppressAddNoteClickRef.current = false;
+      return;
+    }
+    addNote();
+  }, [addNote]);
+
+  const onAddNoteDragStart = useCallback(
+    (e: React.DragEvent<HTMLButtonElement>) => {
+      suppressAddNoteClickRef.current = true;
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData(
+        "application/x-corkboard-new-note",
+        JSON.stringify({ colorKey, formatting }),
+      );
+      const empty = new Image();
+      empty.src = EMPTY_DRAG_IMAGE;
+      e.dataTransfer.setDragImage(empty, 0, 0);
+      setPlaceNoteGhost({ x: e.clientX, y: e.clientY });
+    },
+    [colorKey, formatting],
+  );
+
+  const onAddNoteDrag = useCallback((e: React.DragEvent<HTMLButtonElement>) => {
+    if (e.clientX !== 0 || e.clientY !== 0) {
+      setPlaceNoteGhost({ x: e.clientX, y: e.clientY });
+    }
+  }, []);
+
+  const onAddNoteDragEnd = useCallback(() => {
+    setPlaceNoteGhost(null);
+    // Drag-start sets suppress to block a synthetic click on this button after dragend.
+    // Canvas drops never fire that click, so clear suppress after the drag finishes.
+    window.setTimeout(() => {
+      suppressAddNoteClickRef.current = false;
+    }, 0);
+  }, []);
+
+  const placeNoteGhostPalette = NOTE_COLOR_META[colorKey];
+  const placeClusterGhostPalette = NOTE_COLOR_META[defaultColorKey];
+
   const addCluster = useCallback(() => {
     pushSnapshot();
     addNodes({
@@ -428,9 +483,92 @@ export function Toolbar({
     });
   }, [addNodes, centrePosition, pushSnapshot, defaultColorKey]);
 
+  const onAddClusterClick = useCallback(() => {
+    if (suppressAddClusterClickRef.current) {
+      suppressAddClusterClickRef.current = false;
+      return;
+    }
+    addCluster();
+  }, [addCluster]);
+
+  const onAddClusterDragStart = useCallback(
+    (e: React.DragEvent<HTMLButtonElement>) => {
+      suppressAddClusterClickRef.current = true;
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData(
+        "application/x-corkboard-new-cluster",
+        JSON.stringify({ colorKey: defaultColorKey }),
+      );
+      const empty = new Image();
+      empty.src = EMPTY_DRAG_IMAGE;
+      e.dataTransfer.setDragImage(empty, 0, 0);
+      setPlaceClusterGhost({ x: e.clientX, y: e.clientY });
+    },
+    [defaultColorKey],
+  );
+
+  const onAddClusterDrag = useCallback((e: React.DragEvent<HTMLButtonElement>) => {
+    if (e.clientX !== 0 || e.clientY !== 0) {
+      setPlaceClusterGhost({ x: e.clientX, y: e.clientY });
+    }
+  }, []);
+
+  const onAddClusterDragEnd = useCallback(() => {
+    setPlaceClusterGhost(null);
+    window.setTimeout(() => {
+      suppressAddClusterClickRef.current = false;
+    }, 0);
+  }, []);
+
   const fontSize = formatting.fontSize ?? "md";
 
   return (
+    <>
+    {placeNoteGhost &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <div
+          className={`pointer-events-none fixed z-[9999] rounded-xl border shadow-2xl ${placeNoteGhostPalette.cardClass}`}
+          style={{
+            left: placeNoteGhost.x - DEFAULT_NOTE_WIDTH / 2,
+            top: placeNoteGhost.y - 24,
+            width: DEFAULT_NOTE_WIDTH,
+            height: DEFAULT_NOTE_HEIGHT,
+            transform: "rotate(-2deg) scale(1.03)",
+            opacity: 0.92,
+          }}
+          aria-hidden
+        >
+          <p className="px-3 py-3 text-sm text-current/45">Note…</p>
+        </div>,
+        document.body,
+      )}
+    {placeClusterGhost &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999]"
+          style={{
+            left: placeClusterGhost.x - CLUSTER_GHOST_WIDTH / 2,
+            top: placeClusterGhost.y - 20,
+            width: CLUSTER_GHOST_WIDTH,
+            height: CLUSTER_GHOST_HEIGHT,
+            transform: "rotate(-1.5deg) scale(1.02)",
+            opacity: 0.92,
+          }}
+          aria-hidden
+        >
+          <div
+            className={`h-full rounded-lg border shadow-2xl ${placeClusterGhostPalette.cardClass}`}
+          >
+            <div className="flex items-center justify-between px-3 pt-2">
+              <span className="text-xs font-medium opacity-50">1 note</span>
+            </div>
+            <p className="px-3 py-2 text-sm italic opacity-40">Note...</p>
+          </div>
+        </div>,
+        document.body,
+      )}
     <Panel
       position="top-left"
       className="!m-0 inset-x-0 w-full max-w-none overflow-visible border-b border-black/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
@@ -484,15 +622,25 @@ export function Toolbar({
         {/* Add note / Add cluster */}
         <button
           type="button"
-          onClick={addNote}
-          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+          draggable
+          onClick={onAddNoteClick}
+          onDragStart={onAddNoteDragStart}
+          onDrag={onAddNoteDrag}
+          onDragEnd={onAddNoteDragEnd}
+          title="Click to add at center · drag onto canvas to place"
+          className="cursor-grab rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 active:cursor-grabbing dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add note
         </button>
         <button
           type="button"
-          onClick={addCluster}
-          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+          draggable
+          onClick={onAddClusterClick}
+          onDragStart={onAddClusterDragStart}
+          onDrag={onAddClusterDrag}
+          onDragEnd={onAddClusterDragEnd}
+          title="Click to add at center · drag onto canvas to place"
+          className="cursor-grab rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 active:cursor-grabbing dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add cluster
         </button>
@@ -657,5 +805,6 @@ export function Toolbar({
         </div>
       </div>
     </Panel>
+    </>
   );
 }

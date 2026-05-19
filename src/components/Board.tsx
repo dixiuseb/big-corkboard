@@ -33,7 +33,7 @@ import ClusterNode, {
 import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/BoardEdge";
 import { ClusterPanel } from "@/components/ClusterPanel";
 import { Toolbar, type WorkspaceFileMenuActions, type CanvasTool } from "@/components/Toolbar";
-import { DEFAULT_NOTE_COLOR, type NoteColorKey } from "@/lib/noteColors";
+import { DEFAULT_NOTE_COLOR, normalizeNoteColorKey, type NoteColorKey } from "@/lib/noteColors";
 import { UndoContext } from "@/lib/UndoContext";
 import {
   loadBoardsMeta,
@@ -1325,14 +1325,80 @@ function BoardCanvas({
   // need any shared React state between the panel and the canvas.
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+    const types = e.dataTransfer.types;
+    if (
+      types.includes("application/x-corkboard-note") ||
+      types.includes("application/x-corkboard-new-note") ||
+      types.includes("application/x-corkboard-new-cluster")
+    ) {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect =
+        types.includes("application/x-corkboard-new-note") ||
+        types.includes("application/x-corkboard-new-cluster")
+          ? "copy"
+          : "move";
     }
   }, []);
 
   const handleCanvasDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+
+    const newNoteRaw = e.dataTransfer.getData("application/x-corkboard-new-note");
+    if (newNoteRaw && sfpRef.current) {
+      let payload: { colorKey?: NoteColorKey; formatting?: NoteFormatting };
+      try {
+        payload = JSON.parse(newNoteRaw) as { colorKey?: NoteColorKey; formatting?: NoteFormatting };
+      } catch {
+        return;
+      }
+      pushSnapshot();
+      const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
+      const position: XYPosition = {
+        x: canvasPos.x - DEFAULT_NOTE_WIDTH / 2,
+        y: canvasPos.y - 20,
+      };
+      const newNote: NoteFlowNode = {
+        id: crypto.randomUUID(),
+        type: "noteCard",
+        position,
+        data: {
+          body: "",
+          colorKey: normalizeNoteColorKey(payload.colorKey),
+          formatting: payload.formatting,
+        },
+      };
+      setNodes((nds) => [...nds, newNote]);
+      return;
+    }
+
+    const newClusterRaw = e.dataTransfer.getData("application/x-corkboard-new-cluster");
+    if (newClusterRaw && sfpRef.current) {
+      let payload: { colorKey?: NoteColorKey };
+      try {
+        payload = JSON.parse(newClusterRaw) as { colorKey?: NoteColorKey };
+      } catch {
+        return;
+      }
+      const colorKey = normalizeNoteColorKey(payload.colorKey);
+      pushSnapshot();
+      const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
+      const position: XYPosition = {
+        x: canvasPos.x - CLUSTER_NODE_FALLBACK.w / 2,
+        y: canvasPos.y - 20,
+      };
+      const newCluster: ClusterFlowNode = {
+        id: crypto.randomUUID(),
+        type: "clusterNode",
+        position,
+        data: {
+          notes: [{ id: crypto.randomUUID(), body: "", colorKey }],
+          colorKey,
+        },
+      };
+      setNodes((nds) => [...nds, newCluster]);
+      return;
+    }
+
     const raw = e.dataTransfer.getData("application/x-corkboard-note");
     if (!raw || !sfpRef.current) return;
     let note: ClusterNoteItem;
