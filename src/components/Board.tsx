@@ -64,6 +64,7 @@ import {
   appendFlattenedClusterMembers,
   appendNestedCluster,
   clusterCanvasToNestedMember,
+  countLeafNotes,
   findLeafNote,
   firstLeafNote,
   flattenLeafNotes,
@@ -76,17 +77,18 @@ import {
   type ClusterMember,
   type ClusterNestedMember,
 } from "@/lib/clusterMembers";
-import { DEFAULT_NOTE_WIDTH, resolveNoteHeight, resolveNoteWidth } from "@/lib/noteDimensions";
+import { DEFAULT_NOTE_WIDTH, resolveClusterOuterSize, resolveNoteHeight, resolveNoteWidth } from "@/lib/noteDimensions";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
 
-const CLUSTER_NODE_FALLBACK = { w: 240, h: 160 };
-
 function boardNodeSize(n: BoardNode | Node): { w: number; h: number } {
   if (n.type === "clusterNode") {
+    const cluster = n as ClusterFlowNode;
+    const members = normalizeClusterMembers(cluster.data.notes as unknown);
+    const { width, height } = resolveClusterOuterSize(firstLeafNote(members), countLeafNotes(members));
     return {
-      w: n.measured?.width ?? CLUSTER_NODE_FALLBACK.w,
-      h: n.measured?.height ?? CLUSTER_NODE_FALLBACK.h,
+      w: n.measured?.width ?? width,
+      h: n.measured?.height ?? height,
     };
   }
   if (n.type === "noteCard") {
@@ -669,7 +671,13 @@ function BoardCanvas({
         id: crypto.randomUUID(),
         type: "noteCard",
         position: ejectPos,
-        data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+        data: {
+          body: note.body,
+          colorKey: note.colorKey,
+          formatting: note.formatting,
+          width: note.width,
+          height: note.height,
+        },
       };
       if (remaining.length === 0) {
         // Cluster is now empty — remove it and place just the note.
@@ -709,6 +717,8 @@ function BoardCanvas({
         body: note.body,
         colorKey: note.colorKey,
         formatting: note.formatting,
+        width: note.width,
+        height: note.height,
       },
     }));
     setNodes((nds) => [
@@ -1118,6 +1128,8 @@ function BoardCanvas({
             body: n.data.body,
             colorKey: n.data.colorKey ?? DEFAULT_NOTE_COLOR,
             formatting: n.data.formatting,
+            width: n.data.width,
+            height: n.data.height,
           })),
           colorKey: anchor.data.colorKey ?? DEFAULT_NOTE_COLOR,
         },
@@ -1145,6 +1157,8 @@ function BoardCanvas({
           body: note.data.body,
           colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
           formatting: note.data.formatting,
+          width: note.data.width,
+          height: note.data.height,
         }],
         colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
       },
@@ -1282,6 +1296,8 @@ function BoardCanvas({
                     body: noteNode.data.body,
                     colorKey: noteNode.data.colorKey,
                     formatting: noteNode.data.formatting,
+                    width: noteNode.data.width,
+                    height: noteNode.data.height,
                   };
                   return {
                     ...c,
@@ -1305,8 +1321,22 @@ function BoardCanvas({
         position: { ...target.position },
         data: {
           notes: [
-            { id: crypto.randomUUID(), body: target.data.body, colorKey: target.data.colorKey, formatting: target.data.formatting },
-            { id: crypto.randomUUID(), body: noteNode.data.body, colorKey: noteNode.data.colorKey, formatting: noteNode.data.formatting },
+            {
+              id: crypto.randomUUID(),
+              body: target.data.body,
+              colorKey: target.data.colorKey,
+              formatting: target.data.formatting,
+              width: target.data.width,
+              height: target.data.height,
+            },
+            {
+              id: crypto.randomUUID(),
+              body: noteNode.data.body,
+              colorKey: noteNode.data.colorKey,
+              formatting: noteNode.data.formatting,
+              width: noteNode.data.width,
+              height: noteNode.data.height,
+            },
           ],
           colorKey: target.data.colorKey ?? DEFAULT_NOTE_COLOR,
         },
@@ -1383,7 +1413,7 @@ function BoardCanvas({
       pushSnapshot();
       const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
       const position: XYPosition = {
-        x: canvasPos.x - CLUSTER_NODE_FALLBACK.w / 2,
+        x: canvasPos.x - DEFAULT_NOTE_WIDTH / 2,
         y: canvasPos.y - 20,
       };
       const newCluster: ClusterFlowNode = {
@@ -1428,7 +1458,13 @@ function BoardCanvas({
       id: crypto.randomUUID(),
       type: "noteCard",
       position,
-      data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+      data: {
+        body: note.body,
+        colorKey: note.colorKey,
+        formatting: note.formatting,
+        width: note.width,
+        height: note.height,
+      },
     };
 
     const members = normalizeClusterMembers(cluster.data.notes as unknown);
