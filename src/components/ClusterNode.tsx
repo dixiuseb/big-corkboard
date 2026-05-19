@@ -14,6 +14,7 @@ import {
 } from "@/lib/clusterMembers";
 import { useSearchSession } from "@/lib/SearchContext";
 import { useLayoutEffect } from "react";
+import { FONT_SIZE_CLASSES, type NoteFontSize } from "@/components/NoteCard";
 
 export type { ClusterMember, ClusterNestedMember, ClusterNoteItem } from "@/lib/clusterMembers";
 
@@ -42,6 +43,16 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const stackLayers = Math.min(leafCount, 3);
   const stackNotes = leafPrefixInMemberOrder(notes, stackLayers);
   const frontNote = firstLeafNote(notes);
+  const frontFmt = frontNote?.formatting ?? {};
+  const frontFontSize: NoteFontSize = frontFmt.fontSize ?? "md";
+  const frontPreviewClasses = [
+    FONT_SIZE_CLASSES[frontFontSize],
+    frontFmt.bold ? "font-bold" : "",
+    frontFmt.italic ? "italic" : "",
+    frontFmt.underline ? "underline" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   // Front card + handles follow the top note; fall back to cluster colorKey for older data.
   const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
   const frontPalette = NOTE_COLOR_META[frontColorKey];
@@ -98,6 +109,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
     peekPadding,
     stackLayers,
     frontNote?.body,
+    frontPreviewClasses,
     selected,
     isDropTarget,
   ]);
@@ -160,7 +172,9 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
           </div>
 
           {/* First note preview */}
-          <p className="min-h-[88px] select-none whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed opacity-75">
+          <p
+            className={`min-h-[88px] select-none whitespace-pre-wrap break-words px-3 py-2 opacity-75 ${frontPreviewClasses}`}
+          >
             {frontNote?.body || (
               <span className="opacity-40 italic">Note...</span>
             )}
