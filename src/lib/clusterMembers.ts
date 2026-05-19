@@ -1,6 +1,7 @@
 import type { NoteFormatting } from "@/components/NoteCard";
 import type { NoteColorKey } from "@/lib/noteColors";
 import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import type { NoteDimensions } from "@/lib/noteDimensions";
 
 /** A note stored inside a cluster (not a canvas node). */
 export type ClusterNoteItem = {
@@ -8,7 +9,7 @@ export type ClusterNoteItem = {
   body: string;
   colorKey?: NoteColorKey;
   formatting?: NoteFormatting;
-};
+} & NoteDimensions;
 
 /** One level of nesting: only flat notes inside (no deeper clusters). */
 export type ClusterNestedMember = {

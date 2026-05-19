@@ -62,6 +62,10 @@ Smaller wins; link GitHub issues inline when you have them (e.g. `(#123)`).
 - [x] **Note resize** — Bottom-right drag handle on selected canvas notes sets **width/height** (clamped min/max, persisted on `noteCard`); overflow uses a **label-tinted custom scroll rail** (draggable, Safari-safe). [#25](https://github.com/dixiuseb/big-corkboard/issues/25)
 - [x] **Drag-to-place new note / cluster** — Click-drag from **Add note** or **Add cluster** to spawn at drop position (ghost while dragging, cancel if released off-canvas); click still adds at viewport center. [#26](https://github.com/dixiuseb/big-corkboard/issues/26)
 
+### Open questions (defer — revisit before big UI changes)
+
+- [ ] **Cluster panel vs canvas note sizing** — Inner notes persist per-note `width` / `height`; the collapsed cluster on canvas uses the **top** note’s dimensions, but panel rows use a separate full-width list layout (`resize-y` textarea, not stored size). Correct data model, but the mismatch can confuse at first. Options for a future pass: panel cards at stored size, resize in panel, or an intentional “list editor vs canvas preview” split with clearer affordances. Needs product discussion before a larger cluster-panel redesign.
+
 Planned v2 **search / export / categories / palette** detail: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions or inline here if you want a single index.
 
 ---

@@ -6,6 +6,9 @@ export const MAX_NOTE_WIDTH = 560;
 export const MIN_NOTE_HEIGHT = 80;
 export const MAX_NOTE_HEIGHT = 480;
 
+/** Header row on collapsed cluster front card (note count + expand). */
+export const CLUSTER_HEADER_HEIGHT = 32;
+
 export type NoteDimensions = {
   width?: number;
   height?: number;
@@ -29,4 +32,20 @@ export function resolveNoteHeight(data: NoteDimensions | undefined): number {
   const h = data?.height;
   if (typeof h === "number" && Number.isFinite(h)) return clampNoteHeight(h);
   return DEFAULT_NOTE_HEIGHT;
+}
+
+export function clusterPeekPadding(leafCount: number): number {
+  return Math.min(leafCount, 3) > 1 ? 12 : 0;
+}
+
+/** Outer collapsed cluster footprint on canvas (peek + header + front note body). */
+export function resolveClusterOuterSize(
+  frontNote: NoteDimensions | undefined,
+  leafCount: number,
+): { width: number; height: number } {
+  const peek = clusterPeekPadding(leafCount);
+  return {
+    width: resolveNoteWidth(frontNote),
+    height: peek + CLUSTER_HEADER_HEIGHT + resolveNoteHeight(frontNote),
+  };
 }
