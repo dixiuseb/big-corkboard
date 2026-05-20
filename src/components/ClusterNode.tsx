@@ -157,7 +157,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   useLayoutEffect(() => {
     if (editing) syncTextareaHeight();
     refreshScrollThumb();
-  }, [editing, frontNote?.body, syncTextareaHeight, refreshScrollThumb, cardWidth, frontPreviewClasses]);
+  }, [editing, frontNote?.body, syncTextareaHeight, refreshScrollThumb, cardWidth, cardHeight, frontPreviewClasses]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -380,7 +380,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
           </div>
 
           {/* First note — dimensions match the top inner note */}
-          <div className="relative min-h-0 flex-1">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <div
               ref={scrollRef}
               data-note-scroll={scrollAreaId}
