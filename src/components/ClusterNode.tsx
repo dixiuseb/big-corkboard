@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
@@ -14,8 +14,7 @@ import {
   updateLeafNoteInMembers,
 } from "@/lib/clusterMembers";
 import { useSearchSession } from "@/lib/SearchContext";
-import { useLayoutEffect } from "react";
-import { FONT_SIZE_CLASSES, type NoteFontSize } from "@/components/NoteCard";
+import { FONT_SIZE_CLASSES, NoteCardScrollbarStyles, type NoteFontSize } from "@/components/NoteCard";
 import {
   clampNoteHeight,
   clampNoteWidth,
@@ -49,6 +48,16 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   const { pushSnapshot } = useUndoContext();
   const categoryFilter = useCategoryFilter();
   const search = useSearchSession();
+  const [editing, setEditing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTrackRef = useRef<HTMLDivElement>(null);
+  const [scrollThumb, setScrollThumb] = useState<{ heightPct: number; topPct: number } | null>(null);
+  const scrollThumbDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startScrollTop: number;
+  } | null>(null);
   const resizeRef = useRef<{
     pointerId: number;
     startX: number;
@@ -59,6 +68,8 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   } | null>(null);
   /** Live dimensions while dragging — avoids persisting on every pointermove. */
   const [resizeLive, setResizeLive] = useState<{ w: number; h: number } | null>(null);
+
+  const scrollAreaId = `cluster-front-${id}`;
 
   const notes = data.notes ?? [];
   const leafCount = countLeafNotes(notes);
@@ -106,6 +117,127 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
   else if (selected) frontRing = `${frontPalette.selectedRing} shadow-lg`;
   else if (passiveClusterSearch) frontRing = `${frontPalette.selectedRing}`;
 
+  const enterEditMode = () => {
+    if (!frontNote) return;
+    pushSnapshot();
+    setEditing(true);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const exitEditMode = () => setEditing(false);
+
+  const updateFrontNoteBody = (body: string) => {
+    if (!frontNote) return;
+    updateNodeData(id, {
+      notes: updateLeafNoteInMembers(notes, frontNote.id, { body }),
+    });
+  };
+
+  const syncTextareaHeight = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "0px";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, []);
+
+  const refreshScrollThumb = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollHeight, clientHeight, scrollTop } = el;
+    if (scrollHeight <= clientHeight + 1) {
+      setScrollThumb(null);
+      return;
+    }
+    const heightPct = (clientHeight / scrollHeight) * 100;
+    const maxTop = 100 - heightPct;
+    const topPct = maxTop > 0 ? (scrollTop / (scrollHeight - clientHeight)) * maxTop : 0;
+    setScrollThumb({ heightPct, topPct });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (editing) syncTextareaHeight();
+    refreshScrollThumb();
+  }, [editing, frontNote?.body, syncTextareaHeight, refreshScrollThumb, cardWidth, frontPreviewClasses]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(refreshScrollThumb);
+    ro.observe(el);
+    el.addEventListener("scroll", refreshScrollThumb, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", refreshScrollThumb);
+    };
+  }, [refreshScrollThumb, editing]);
+
+  const onScrollAreaWheel = (e: React.WheelEvent) => {
+    e.stopPropagation();
+    const el = scrollRef.current;
+    if (!el || el.scrollHeight <= el.clientHeight + 1) return;
+    el.scrollTop += e.deltaY;
+  };
+
+  const scrollByTrackPointer = useCallback(
+    (clientY: number, startScrollTop: number, startClientY: number) => {
+      const el = scrollRef.current;
+      const track = scrollTrackRef.current;
+      if (!el || !track || !scrollThumb) return;
+      const trackHeight = track.clientHeight;
+      const thumbTravel = trackHeight * (1 - scrollThumb.heightPct / 100);
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll <= 0 || thumbTravel <= 0) return;
+      const dy = clientY - startClientY;
+      el.scrollTop = Math.min(maxScroll, Math.max(0, startScrollTop + (dy / thumbTravel) * maxScroll));
+    },
+    [scrollThumb],
+  );
+
+  const onScrollTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = scrollRef.current;
+    const track = scrollTrackRef.current;
+    if (!el || !track || !scrollThumb) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const yInTrack = e.clientY - trackRect.top;
+    const thumbHeightPx = (scrollThumb.heightPct / 100) * trackRect.height;
+    const thumbTopPx = (scrollThumb.topPct / 100) * trackRect.height;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+
+    if (yInTrack < thumbTopPx || yInTrack > thumbTopPx + thumbHeightPx) {
+      const scrollRatio = (yInTrack - thumbHeightPx / 2) / Math.max(1, trackRect.height - thumbHeightPx);
+      el.scrollTop = Math.min(maxScroll, Math.max(0, scrollRatio * maxScroll));
+    }
+
+    scrollThumbDragRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      startScrollTop: el.scrollTop,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onScrollTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollThumbDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    scrollByTrackPointer(e.clientY, drag.startScrollTop, drag.startY);
+  };
+
+  const onScrollTrackPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollThumbDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    scrollThumbDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const scrollAreaClass = `note-card-scroll min-h-0 flex-1 overflow-x-hidden ${
+    scrollThumb ? "note-card-scroll--overflow" : "overflow-y-hidden"
+  }`;
+
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
     // Close any other open cluster panel before expanding this one.
@@ -135,6 +267,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
     frontNote?.width,
     frontNote?.height,
     frontPreviewClasses,
+    editing,
     selected,
     isDropTarget,
   ]);
@@ -188,6 +321,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
   return (
     <>
+      <NoteCardScrollbarStyles nodeId={scrollAreaId} handleClass={frontPalette.handleClass} />
       <div
         className={`relative transition-opacity ${outerDimmed ? "opacity-[0.38]" : ""}`}
         style={{ width: cardWidth, paddingTop: peekPadding }}
@@ -215,7 +349,8 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
 
         {/* Front card */}
         <div
-          className={`relative flex flex-col overflow-hidden rounded-lg border shadow-md ${activeClusterSearch ? "ring-4" : "ring-2"} ring-offset-2 ring-offset-white transition-[opacity,transform,box-shadow] dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${frontRing}`}
+          onDoubleClick={!editing && frontNote ? enterEditMode : undefined}
+          className={`relative flex flex-col overflow-hidden rounded-lg border shadow-md ${activeClusterSearch ? "ring-4" : "ring-2"} ring-offset-2 ring-offset-white transition-[opacity,transform,box-shadow] dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${frontRing} ${editing ? "cursor-default" : ""}`}
           style={{ zIndex: stackLayers, height: CLUSTER_HEADER_HEIGHT + cardHeight }}
         >
           {/* Header row: note count + expand button */}
@@ -231,6 +366,7 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
               type="button"
               title="Expand cluster"
               onClick={openPanel}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="nodrag flex h-6 w-6 items-center justify-center rounded-md opacity-40 transition-opacity hover:opacity-80"
             >
               {/* Expand icon */}
@@ -243,18 +379,71 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
             </button>
           </div>
 
-          {/* First note preview — dimensions match the top inner note */}
-          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-            <p
-              className={`select-none whitespace-pre-wrap break-words px-3 py-2 opacity-75 ${frontPreviewClasses}`}
+          {/* First note — dimensions match the top inner note */}
+          <div className="relative min-h-0 flex-1">
+            <div
+              ref={scrollRef}
+              data-note-scroll={scrollAreaId}
+              onWheel={onScrollAreaWheel}
+              className={scrollAreaClass}
             >
-              {frontNote?.body || (
-                <span className="opacity-40 italic">Note...</span>
+              {editing && frontNote ? (
+                <textarea
+                  ref={textareaRef}
+                  value={frontNote.body}
+                  onChange={(e) => {
+                    updateFrontNoteBody(e.target.value);
+                    syncTextareaHeight();
+                    requestAnimationFrame(refreshScrollThumb);
+                  }}
+                  onBlur={exitEditMode}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      exitEditMode();
+                    }
+                  }}
+                  placeholder="Note…"
+                  rows={1}
+                  className={`nodrag nopan block w-full cursor-text resize-none overflow-hidden bg-transparent px-3 py-2 pr-4 outline-none placeholder:text-current/45 ${frontPreviewClasses}`}
+                  spellCheck
+                />
+              ) : (
+                <p
+                  className={`select-none whitespace-pre-wrap break-words px-3 py-2 pr-4 opacity-75 empty:after:text-current/45 empty:after:content-['Note…'] ${frontPreviewClasses}`}
+                >
+                  {frontNote?.body}
+                </p>
               )}
-            </p>
+            </div>
+
+            {scrollThumb && (
+              <div
+                ref={scrollTrackRef}
+                role="scrollbar"
+                aria-orientation="vertical"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(scrollThumb.topPct)}
+                className="nodrag nopan absolute bottom-0 right-0 top-0 z-10 w-3 cursor-grab touch-none active:cursor-grabbing"
+                onPointerDown={onScrollTrackPointerDown}
+                onPointerMove={onScrollTrackPointerMove}
+                onPointerUp={onScrollTrackPointerEnd}
+                onPointerCancel={onScrollTrackPointerEnd}
+              >
+                <div
+                  data-note-scroll-thumb={scrollAreaId}
+                  className="pointer-events-none absolute right-1 w-1 rounded-full opacity-80"
+                  style={{
+                    height: `${scrollThumb.heightPct}%`,
+                    top: `${scrollThumb.topPct}%`,
+                  }}
+                />
+              </div>
+            )}
           </div>
 
-          {selected && frontNote && (
+          {selected && frontNote && !editing && (
             <div
               role="separator"
               aria-label="Resize cluster"

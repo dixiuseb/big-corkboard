@@ -48,7 +48,7 @@ export const FONT_SIZE_CLASSES: Record<NoteFontSize, string> = {
 };
 
 /** Per-note scrollbar rules — native bar hidden when overflow; custom rail shows instead. */
-function NoteCardScrollbarStyles({ nodeId, handleClass }: { nodeId: string; handleClass: string }) {
+export function NoteCardScrollbarStyles({ nodeId, handleClass }: { nodeId: string; handleClass: string }) {
   const { light, dark } = parseHandleFillColors(handleClass);
   const sel = `[data-note-scroll="${nodeId}"]`;
   const thumb = `[data-note-scroll-thumb="${nodeId}"]`;

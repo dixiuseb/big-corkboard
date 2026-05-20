@@ -117,7 +117,7 @@ This way the tab list can be loaded instantly without deserializing every board�
   - 1 note → single card
   - 2 notes → 2 cards stacked
   - 3+ notes → 3 cards stacked (capped visually at 3)
-- **Front card content**: the first note’s text verbatim (including its **formatting**). Users who want a cluster label make the first note a short title card.
+- **Front card content**: the first note’s text verbatim (including its **formatting**). Users who want a cluster label make the first note a short title card. **Double-click** the collapsed cluster to edit that front note inline (same edit/blur/`Escape` behavior as a canvas note).
 - **Front card size**: the collapsed cluster’s width and preview body height follow the **first note in member order** (the same note as the front card). Each inner note may store its own optional `width` / `height`; reordering in the panel updates the canvas cluster to match the new top note’s dimensions.
 - **Resize (v2)**: selected clusters expose the same **bottom-right resize handle** as notes. Dragging resizes **only the top inner note** (not every note in the cluster). Other inner notes keep their stored sizes for when they move to the front. Toolbar **Fit** uses the same top-note rule.
 - **Expanding**: expand control on the cluster node opens the **side panel**; the cluster node stays on the canvas.
