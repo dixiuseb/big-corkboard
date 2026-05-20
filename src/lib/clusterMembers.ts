@@ -1,6 +1,5 @@
 import type { NoteFormatting } from "@/components/NoteCard";
-import type { NoteColorKey } from "@/lib/noteColors";
-import { DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
+import { DEFAULT_NOTE_COLOR, normalizeNoteColorKey, type NoteColorKey } from "@/lib/noteColors";
 import type { NoteDimensions } from "@/lib/noteDimensions";
 
 /** A note stored inside a cluster (not a canvas node). */
@@ -26,6 +25,10 @@ export function isNestedClusterMember(m: ClusterMember): m is ClusterNestedMembe
   return (m as ClusterNestedMember).type === "nestedCluster";
 }
 
+function normalizeClusterNoteItem(note: ClusterNoteItem): ClusterNoteItem {
+  return { ...note, colorKey: normalizeNoteColorKey(note.colorKey) };
+}
+
 /** Coerce persisted JSON into members (legacy boards are all plain notes). */
 export function normalizeClusterMembers(raw: unknown): ClusterMember[] {
   if (!Array.isArray(raw)) return [];
@@ -38,19 +41,19 @@ export function normalizeClusterMembers(raw: unknown): ClusterMember[] {
       for (const n of o.notes) {
         if (!n || typeof n !== "object") continue;
         const nn = n as ClusterNoteItem;
-        if (typeof nn.id === "string") notes.push({ ...nn });
+        if (typeof nn.id === "string") notes.push(normalizeClusterNoteItem({ ...nn }));
       }
       out.push({
         type: "nestedCluster",
         id: o.id,
-        colorKey: o.colorKey as NoteColorKey | undefined,
+        colorKey: normalizeNoteColorKey(o.colorKey),
         notes,
       });
       continue;
     }
     const note = item as ClusterNoteItem;
     if (typeof note.id === "string") {
-      out.push({ ...note });
+      out.push(normalizeClusterNoteItem({ ...note }));
     }
   }
   return out;
