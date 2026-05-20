@@ -2,7 +2,7 @@
 
 A digital cork board for planning writing projects: an infinite canvas where you place standalone notes and expandable clusters, drag them freely, and connect ideas when you want. The point is quick visual scanning and spatial thinking—not a rigid folder tree.
 
-**Try it:** [bigcorkboard.com](https://bigcorkboard.com) — runs in your browser. **v1** keeps your boards on **this device only** (see [Where your data stays](#where-your-data-stays)).
+**Try it:** [bigcorkboard.com](https://bigcorkboard.com) — runs in your browser. Boards stay on **this device only** (see [Where your data stays](#where-your-data-stays)). **v2** adds categories, search, export, nested clusters, and note resize; use **File → Export workspace as JSON** to back up or move projects.
 
 ---
 

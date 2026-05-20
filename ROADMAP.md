@@ -25,50 +25,30 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 ---
 
-## v2 — in progress
+## v2 — shipped
 
-**Theme:** More useful and polished **without a backend** — still local / client-only unless a feature explicitly adds something like optional export-only flows.
+**Live:** [bigcorkboard.com](https://bigcorkboard.com) (same deployment as v1; existing users upgrade in place via browser storage)
 
-**Product framing:** The tabbed boards in the UI are one **workspace** (one project). v2 **JSON export/import** is scoped to the **whole workspace** so it doubles as the manual “switch project” path until v3 desktop save files ship. See [SPEC.md — Workspaces vs boards](./SPEC.md#workspaces-vs-boards) and [Export (v2)](./SPEC.md#export-v2).
+**Theme:** More useful and polished **without a backend** — categories, search, export, nested clusters, resize, and canvas polish. Workspace JSON export/import for manual project switching until v3 desktop save files.
 
-### Scope
+### Completed milestones (checklist)
 
-| Area | Intent |
-|------|--------|
-| **Categories** | Per-board color labels + legend UI; **filter by color** on the canvas (dim non-matches). |
-| **Palette** | **Eight** unified, high-contrast note colors with **light/dark** surfaces (no separate user “theme” pick); see `noteColors.ts`. |
-| **Search** | `Cmd/Ctrl+F` on the **active board** only: floating bar, cycling, pan/zoom-to-readable for the active hit, cluster panel integration, color-filter suspend while open. No cross-board search in v2. See [SPEC.md](./SPEC.md#search-v2). |
-| **Export** | **PNG:** current view + fit-all. **JSON:** versioned snapshot of **all boards in the workspace**; import **replaces** the in-memory workspace after confirmation (no merge in v2). Same envelope becomes the v3 desktop save file. See [SPEC.md — Export (v2)](./SPEC.md#export-v2). |
-| **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel **indented** tree with **note DnD** (reorder and move between root and nested sections). Deeper hierarchy → **nested corkboards (v3)**. |
-| **Polish** | Small UX wins that don’t warrant their own row — track as individual GitHub issues. |
-
-### Work items (living checklist)
-
-Use this list for planning issues/PRs; reorder as priorities shift.
-
-- [x] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
-- [x] **Filter by color** — Legend swatch: dim non-matching notes, clusters, edges, and cluster-panel rows; clear on `Escape`, **Clear filter**, or second click on the active swatch.  
-- [x] **Note palette** — Eight theme-aware colors (light + dark card surfaces, label-tint handles/rings); legacy six-color keys migrate on load.  
-- [x] **Search** — [SPEC.md — Search (v2)](./SPEC.md#search-v2): floating top-center bar (non-modal), debounced query, match rings + dim non-matches, cycle with wrap, smart pan/zoom for active match, cluster-internal stops + panel, color filter suspended while open.
-- [x] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; default filename from board title + timestamp.  
-- [x] **Export / import JSON** — Versioned `{ version, exportedAt, boards[] }` for **all boards in the workspace**; file pick or drop; v2 conflict behavior **replace workspace** with explicit overwrite warning (manual project switch). **Implementation:** persistence uses split `localStorage` keys (`corkboard:boards` + per-board `corkboard:board:{id}`); the exporter must **gather every board** into one snapshot, not only the active board’s in-memory state. Same format = v3 save file per [SPEC.md](./SPEC.md#desktop-application-and-save-files-v3).  
-- [x] **Multi-select & bulk actions** — **Ctrl/Cmd+click** additive select; **Shift+drag** marquee (React Flow default). Toolbar **color / font / formatting / delete** applies to all selected canvas notes and clusters (clusters: cluster + inner notes for color/size/format). **Bulk cluster:** two or more selected **notes** combine into one cluster (edges remapped to anchor); single selected note still promotes. **Bulk move:** native multi-node drag + one undo snapshot on drag start. Pin-to-cluster / note-merge on drop is disabled when multiple canvas nodes are selected.  
-- [x] **Nested clusters (max depth 1)** — Data model + canvas drop (cluster → cluster) + dialog (**Flatten** | **Nest** | **Cancel**); panel **indented** tree + note **DnD** (reorder within a nested block and between root / nested sections); enforce **no cluster inside a child cluster**. Spec: [SPEC.md](./SPEC.md) *Nested clusters*.  
-
-### Polish & small UX (v2 backlog)
-
-Smaller wins; link GitHub issues inline when you have them (e.g. `(#123)`).
-
-- [x] **Note resize** — Bottom-right drag handle on selected canvas notes sets **width/height** (clamped min/max, persisted on `noteCard`); overflow uses a **label-tinted custom scroll rail** (draggable, Safari-safe). [#25](https://github.com/dixiuseb/big-corkboard/issues/25)
-- [x] **Drag-to-place new note / cluster** — Click-drag from **Add note** or **Add cluster** to spawn at drop position (ghost while dragging, cancel if released off-canvas); click still adds at viewport center. [#26](https://github.com/dixiuseb/big-corkboard/issues/26)
-- [x] **Resize to fit** — Toolbar **Fit**: height to content at current width (floor = default); empty note → default size; bulk on multi-select; clusters → top inner note only.
+- [x] Color legend + filter by color  
+- [x] Eight-color theme-aware palette (legacy six-color keys migrate on load)  
+- [x] Board search (`Cmd/Ctrl+F`) with cluster panel integration  
+- [x] Export PNG (viewport + fit all)  
+- [x] Export / import workspace JSON  
+- [x] Multi-select + bulk toolbar actions  
+- [x] Nested clusters (max depth 1)  
+- [x] Note + cluster resize, **Fit**, drag-to-place new note/cluster  
+- [x] Cluster front-card formatting + double-click inline edit  
 
 ### Open questions (defer — revisit before big UI changes)
 
 - [ ] **Cluster panel vs canvas note sizing** — Inner notes persist per-note `width` / `height`; the collapsed cluster on canvas uses the **top** note’s dimensions, but panel rows use a separate full-width list layout (`resize-y` textarea, not stored size). Correct data model, but the mismatch can confuse at first. Options for a future pass: panel cards at stored size, resize in panel, or an intentional “list editor vs canvas preview” split with clearer affordances. Needs product discussion before a larger cluster-panel redesign.
 - [ ] **Default note sizing mode** — v2 uses **fixed** default cards + scroll + manual resize + **Fit**. Future **app preference**: auto-grow height while typing (min = default) vs fixed boxes. Needs per-note **fixed** override after manual resize; global toggle sets default for new notes only (or optional bulk apply). See [SPEC.md — Default note sizing mode (open)](./SPEC.md#default-note-sizing-mode-open).
 
-Planned v2 **search / export / categories / palette** detail: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions or inline here if you want a single index.
+Historical v2 scope table and polish issue links: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions if you want a single index.
 
 ---
 
