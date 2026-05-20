@@ -8,8 +8,15 @@ import {
   NOTE_COLOR_KEYS,
   NOTE_COLOR_META,
 } from "@/lib/noteColors";
+import { DEFAULT_NOTE_HEIGHT, DEFAULT_NOTE_WIDTH } from "@/lib/noteDimensions";
 import type { NoteFormatting, NoteFontSize } from "@/components/NoteCard";
 import { useUndoContext } from "@/lib/UndoContext";
+import { exportBoardFlowPng, type BoardPngExportMode } from "@/lib/boardPngExport";
+
+export type WorkspaceFileMenuActions = {
+  onExportWorkspaceJson: () => void;
+  onRequestImportWorkspaceJson: () => void;
+};
 
 function AboutMenu() {
   const linkClass =
@@ -126,6 +133,181 @@ function AboutMenu() {
   );
 }
 
+function FileMenu({
+  boardTitle,
+  workspaceFile,
+}: {
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
+}) {
+  const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
+  const [open, setOpen] = useState(false);
+  const [exportingPng, setExportingPng] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    if (!open || !buttonRef.current) {
+      setPlacement(null);
+      return;
+    }
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPlacement({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    updatePlacement();
+  }, [updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => updatePlacement();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, updatePlacement]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const runExport = useCallback(
+    async (mode: BoardPngExportMode) => {
+      const el = document.querySelector("[data-corkboard-react-flow]");
+      if (!(el instanceof HTMLElement)) {
+        window.alert("Could not find the canvas to export.");
+        return;
+      }
+      setExportingPng(true);
+      try {
+        await exportBoardFlowPng(el, boardTitle, mode, {
+          fitView,
+          getViewport,
+          setViewport,
+          getNodes,
+        });
+        setOpen(false);
+      } catch (e) {
+        console.error(e);
+        window.alert("PNG export failed. Try again, or close other overlays and retry.");
+      } finally {
+        setExportingPng(false);
+      }
+    },
+    [boardTitle, fitView, getViewport, setViewport, getNodes],
+  );
+
+  const menu =
+    open &&
+    placement &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        ref={menuRef}
+        role="menu"
+        style={{
+          position: "fixed",
+          top: placement.top,
+          right: placement.right,
+          zIndex: 10050,
+          width: "min(20rem, calc(100vw - 2rem))",
+        }}
+        className="rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+      >
+        <div className="border-b border-black/8 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-black/40 dark:border-white/8 dark:text-white/40">
+          File
+        </div>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => void runExport("viewport")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (current view)…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => void runExport("fitAll")}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export PNG (fit all notes)…
+        </button>
+        <div className="mx-3 my-1 h-px bg-black/8 dark:bg-white/8" />
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => {
+            try {
+              workspaceFile.onExportWorkspaceJson();
+              setOpen(false);
+            } catch (e) {
+              console.error(e);
+              window.alert("Could not export the workspace.");
+            }
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Export workspace as JSON…
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportingPng}
+          onClick={() => {
+            setOpen(false);
+            workspaceFile.onRequestImportWorkspaceJson();
+          }}
+          className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
+        >
+          Import workspace…
+        </button>
+      </div>,
+      document.body,
+    );
+
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        disabled={exportingPng}
+        title="File — export PNG, backup workspace JSON, import workspace"
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+      >
+        File
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {menu}
+    </div>
+  );
+}
+
 const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "sm", label: "S" },
   { key: "md", label: "M" },
@@ -133,13 +315,29 @@ const FONT_SIZES: { key: NoteFontSize; label: string }[] = [
   { key: "xl", label: "XL" },
 ];
 
+const EMPTY_DRAG_IMAGE =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+/** Matches collapsed cluster node footprint on canvas (see Board.tsx). */
+const CLUSTER_GHOST_WIDTH = 240;
+const CLUSTER_GHOST_HEIGHT = 160;
+
+export type CanvasTool = "pan" | "select";
+
 type ToolbarProps = {
+  canvasTool: CanvasTool;
+  onCanvasToolChange: (tool: CanvasTool) => void;
   connecting: boolean;
   onToggleConnecting: () => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  searchOpen: boolean;
+  onOpenSearch: () => void;
+  /** Active board tab title — used in PNG export filenames. */
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
   onClearBoard: () => void;
   // Note formatting — reflects the selected note's settings, or the running default.
   colorKey: NoteColorKey;
@@ -151,17 +349,25 @@ type ToolbarProps = {
   // Contextual actions — enabled only when a note is selected.
   canCreateCluster: boolean;
   onCreateCluster: () => void;
+  canResizeToFit: boolean;
+  onResizeToFit: () => void;
   canDelete: boolean;
   onDeleteSelected: () => void;
 };
 
 export function Toolbar({
+  canvasTool,
+  onCanvasToolChange,
   connecting,
   onToggleConnecting,
   onUndo,
   onRedo,
   canUndo,
   canRedo,
+  searchOpen,
+  onOpenSearch,
+  boardTitle,
+  workspaceFile,
   onClearBoard,
   colorKey,
   formatting,
@@ -171,11 +377,41 @@ export function Toolbar({
   onToggleFormat,
   canCreateCluster,
   onCreateCluster,
+  canResizeToFit,
+  onResizeToFit,
   canDelete,
   onDeleteSelected,
 }: ToolbarProps) {
   const { addNodes, screenToFlowPosition } = useReactFlow();
   const { pushSnapshot } = useUndoContext();
+
+  const [placeNoteGhost, setPlaceNoteGhost] = useState<{ x: number; y: number } | null>(null);
+  const [placeClusterGhost, setPlaceClusterGhost] = useState<{ x: number; y: number } | null>(null);
+  const suppressAddNoteClickRef = useRef(false);
+  const suppressAddClusterClickRef = useRef(false);
+
+  /** Shift mirrors Select in the UI while Pan mode stays the stored tool. */
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const sync = (e: KeyboardEvent) => setShiftHeld(e.shiftKey);
+    const clear = () => setShiftHeld(false);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", sync);
+    window.addEventListener("keyup", sync);
+    window.addEventListener("blur", clear);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("keydown", sync);
+      window.removeEventListener("keyup", sync);
+      window.removeEventListener("blur", clear);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  const panLooksActive = canvasTool === "pan" && !shiftHeld;
+  const selectLooksActive = canvasTool === "select" || shiftHeld;
 
   const centrePosition = useCallback(
     () =>
@@ -196,6 +432,48 @@ export function Toolbar({
     });
   }, [addNodes, centrePosition, pushSnapshot, colorKey, formatting]);
 
+  const onAddNoteClick = useCallback(() => {
+    if (suppressAddNoteClickRef.current) {
+      suppressAddNoteClickRef.current = false;
+      return;
+    }
+    addNote();
+  }, [addNote]);
+
+  const onAddNoteDragStart = useCallback(
+    (e: React.DragEvent<HTMLButtonElement>) => {
+      suppressAddNoteClickRef.current = true;
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData(
+        "application/x-corkboard-new-note",
+        JSON.stringify({ colorKey, formatting }),
+      );
+      const empty = new Image();
+      empty.src = EMPTY_DRAG_IMAGE;
+      e.dataTransfer.setDragImage(empty, 0, 0);
+      setPlaceNoteGhost({ x: e.clientX, y: e.clientY });
+    },
+    [colorKey, formatting],
+  );
+
+  const onAddNoteDrag = useCallback((e: React.DragEvent<HTMLButtonElement>) => {
+    if (e.clientX !== 0 || e.clientY !== 0) {
+      setPlaceNoteGhost({ x: e.clientX, y: e.clientY });
+    }
+  }, []);
+
+  const onAddNoteDragEnd = useCallback(() => {
+    setPlaceNoteGhost(null);
+    // Drag-start sets suppress to block a synthetic click on this button after dragend.
+    // Canvas drops never fire that click, so clear suppress after the drag finishes.
+    window.setTimeout(() => {
+      suppressAddNoteClickRef.current = false;
+    }, 0);
+  }, []);
+
+  const placeNoteGhostPalette = NOTE_COLOR_META[colorKey];
+  const placeClusterGhostPalette = NOTE_COLOR_META[defaultColorKey];
+
   const addCluster = useCallback(() => {
     pushSnapshot();
     addNodes({
@@ -209,9 +487,92 @@ export function Toolbar({
     });
   }, [addNodes, centrePosition, pushSnapshot, defaultColorKey]);
 
+  const onAddClusterClick = useCallback(() => {
+    if (suppressAddClusterClickRef.current) {
+      suppressAddClusterClickRef.current = false;
+      return;
+    }
+    addCluster();
+  }, [addCluster]);
+
+  const onAddClusterDragStart = useCallback(
+    (e: React.DragEvent<HTMLButtonElement>) => {
+      suppressAddClusterClickRef.current = true;
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData(
+        "application/x-corkboard-new-cluster",
+        JSON.stringify({ colorKey: defaultColorKey }),
+      );
+      const empty = new Image();
+      empty.src = EMPTY_DRAG_IMAGE;
+      e.dataTransfer.setDragImage(empty, 0, 0);
+      setPlaceClusterGhost({ x: e.clientX, y: e.clientY });
+    },
+    [defaultColorKey],
+  );
+
+  const onAddClusterDrag = useCallback((e: React.DragEvent<HTMLButtonElement>) => {
+    if (e.clientX !== 0 || e.clientY !== 0) {
+      setPlaceClusterGhost({ x: e.clientX, y: e.clientY });
+    }
+  }, []);
+
+  const onAddClusterDragEnd = useCallback(() => {
+    setPlaceClusterGhost(null);
+    window.setTimeout(() => {
+      suppressAddClusterClickRef.current = false;
+    }, 0);
+  }, []);
+
   const fontSize = formatting.fontSize ?? "md";
 
   return (
+    <>
+    {placeNoteGhost &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <div
+          className={`pointer-events-none fixed z-[9999] rounded-xl border shadow-2xl ${placeNoteGhostPalette.cardClass}`}
+          style={{
+            left: placeNoteGhost.x - DEFAULT_NOTE_WIDTH / 2,
+            top: placeNoteGhost.y - 24,
+            width: DEFAULT_NOTE_WIDTH,
+            height: DEFAULT_NOTE_HEIGHT,
+            transform: "rotate(-2deg) scale(1.03)",
+            opacity: 0.92,
+          }}
+          aria-hidden
+        >
+          <p className="px-3 py-3 text-sm text-current/45">Note…</p>
+        </div>,
+        document.body,
+      )}
+    {placeClusterGhost &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999]"
+          style={{
+            left: placeClusterGhost.x - CLUSTER_GHOST_WIDTH / 2,
+            top: placeClusterGhost.y - 20,
+            width: CLUSTER_GHOST_WIDTH,
+            height: CLUSTER_GHOST_HEIGHT,
+            transform: "rotate(-1.5deg) scale(1.02)",
+            opacity: 0.92,
+          }}
+          aria-hidden
+        >
+          <div
+            className={`h-full rounded-lg border shadow-2xl ${placeClusterGhostPalette.cardClass}`}
+          >
+            <div className="flex items-center justify-between px-3 pt-2">
+              <span className="text-xs font-medium opacity-50">1 note</span>
+            </div>
+            <p className="px-3 py-2 text-sm italic opacity-40">Note...</p>
+          </div>
+        </div>,
+        document.body,
+      )}
     <Panel
       position="top-left"
       className="!m-0 inset-x-0 w-full max-w-none overflow-visible border-b border-black/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
@@ -245,21 +606,45 @@ export function Toolbar({
             <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
           </svg>
         </button>
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          title="Search notes (⌘F)"
+          aria-pressed={searchOpen}
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white ${
+            searchOpen ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300" : ""
+          }`}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="6" />
+            <path d="m20 20-4.3-4.3" />
+          </svg>
+        </button>
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
         {/* Add note / Add cluster */}
         <button
           type="button"
-          onClick={addNote}
-          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+          draggable
+          onClick={onAddNoteClick}
+          onDragStart={onAddNoteDragStart}
+          onDrag={onAddNoteDrag}
+          onDragEnd={onAddNoteDragEnd}
+          title="Click to add at center · drag onto canvas to place"
+          className="cursor-grab rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 active:cursor-grabbing dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add note
         </button>
         <button
           type="button"
-          onClick={addCluster}
-          className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
+          draggable
+          onClick={onAddClusterClick}
+          onDragStart={onAddClusterDragStart}
+          onDrag={onAddClusterDrag}
+          onDragEnd={onAddClusterDragEnd}
+          title="Click to add at center · drag onto canvas to place"
+          className="cursor-grab rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 active:cursor-grabbing dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
         >
           Add cluster
         </button>
@@ -318,10 +703,26 @@ export function Toolbar({
 
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
-        {/* Create cluster (canvas note only) */}
+        {/* Resize to fit — height to content at current width; empty → default size */}
         <button
           type="button"
-          title="Create cluster from selected note"
+          title="Resize to fit content (height; min default size)"
+          onClick={onResizeToFit}
+          disabled={!canResizeToFit}
+          className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 5v14" />
+            <path d="m8 9 4-4 4 4" />
+            <path d="m8 15 4 4 4-4" />
+          </svg>
+          Fit
+        </button>
+
+        {/* Create cluster: one note → promote; multiple notes only → combine */}
+        <button
+          type="button"
+          title="Cluster — turn one note into a cluster, or combine several selected notes (⌘/Ctrl-click to multi-select)"
           onClick={onCreateCluster}
           disabled={!canCreateCluster}
           className="flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/50 hover:bg-black/5 hover:text-black dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -335,10 +736,10 @@ export function Toolbar({
           Cluster
         </button>
 
-        {/* Delete selected note */}
+        {/* Delete selected canvas nodes and/or panel note */}
         <button
           type="button"
-          title="Delete selected note"
+          title="Delete selected items"
           onClick={onDeleteSelected}
           disabled={!canDelete}
           className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-30 text-black/40 hover:bg-red-50 hover:text-red-500 dark:text-white/30 dark:hover:bg-red-950/40 dark:hover:text-red-400 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
@@ -376,6 +777,35 @@ export function Toolbar({
           Connect
         </button>
 
+        <div className="flex overflow-hidden rounded-lg border border-black/15 dark:border-white/15">
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("pan")}
+            title="Pan — drag the canvas with the left mouse button (default)"
+            aria-pressed={panLooksActive}
+            className={`border-0 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              panLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Pan
+          </button>
+          <button
+            type="button"
+            onClick={() => onCanvasToolChange("select")}
+            title="Select — drag on empty canvas to select notes (same as Shift in Pan). Middle or right mouse still pans."
+            aria-pressed={selectLooksActive}
+            className={`border-0 border-l border-black/10 px-2.5 py-1.5 text-xs font-medium transition-colors dark:border-white/10 ${
+              selectLooksActive
+                ? "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-300"
+                : "bg-transparent text-stone-600 hover:bg-black/5 hover:text-stone-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            Select
+          </button>
+        </div>
+
         <div className="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
 
         {/* Clear board */}
@@ -389,8 +819,12 @@ export function Toolbar({
         </button>
         </div>
 
-        <AboutMenu />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FileMenu boardTitle={boardTitle} workspaceFile={workspaceFile} />
+          <AboutMenu />
+        </div>
       </div>
     </Panel>
+    </>
   );
 }

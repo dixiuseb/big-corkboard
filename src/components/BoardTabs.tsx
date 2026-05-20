@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { BoardMeta } from "@/lib/persistence";
-
-const MAX_BOARDS = 8;
+import { WORKSPACE_MAX_BOARDS } from "@/lib/workspaceJson";
 
 type Props = {
   boards: BoardMeta[];
@@ -151,7 +150,7 @@ export function BoardTabs({
           );
         })}
 
-        {boards.length < MAX_BOARDS && (
+        {boards.length < WORKSPACE_MAX_BOARDS && (
           <button
             type="button"
             onClick={onAdd}

@@ -1,21 +1,34 @@
 "use client";
 
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { type NoteColorKey, NOTE_COLOR_META, DEFAULT_NOTE_COLOR } from "@/lib/noteColors";
-import type { NoteFormatting } from "@/components/NoteCard";
-import { useLayoutEffect, type CSSProperties } from "react";
+import { useCategoryFilter } from "@/lib/CategoryFilterContext";
+import {
+  clusterMembersMatchFilter,
+  type ClusterMember,
+  countLeafNotes,
+  firstLeafNote,
+  leafPrefixInMemberOrder,
+  updateLeafNoteInMembers,
+} from "@/lib/clusterMembers";
+import { useSearchSession } from "@/lib/SearchContext";
+import { FONT_SIZE_CLASSES, NoteCardScrollbarStyles, type NoteFontSize } from "@/components/NoteCard";
+import {
+  clampNoteHeight,
+  clampNoteWidth,
+  CLUSTER_HEADER_HEIGHT,
+  clusterPeekPadding,
+  resolveNoteHeight,
+  resolveNoteWidth,
+} from "@/lib/noteDimensions";
+import { useUndoContext } from "@/lib/UndoContext";
 
-// A note stored inside a cluster (not a canvas node).
-export type ClusterNoteItem = {
-  id: string;
-  body: string;
-  colorKey?: NoteColorKey;
-  formatting?: NoteFormatting;
-};
+export type { ClusterMember, ClusterNestedMember, ClusterNoteItem } from "@/lib/clusterMembers";
 
 export type ClusterNodeData = {
-  notes: ClusterNoteItem[];
+  notes: ClusterMember[];
   colorKey?: NoteColorKey;
   expanded?: boolean;
   isDropTarget?: boolean;
@@ -30,22 +43,200 @@ const BACK_CARD_TRANSFORMS = [
 ];
 
 function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
-  const { setNodes } = useReactFlow();
+  const { setNodes, updateNodeData, getZoom } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
+  const { pushSnapshot } = useUndoContext();
+  const categoryFilter = useCategoryFilter();
+  const search = useSearchSession();
+  const [editing, setEditing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTrackRef = useRef<HTMLDivElement>(null);
+  const [scrollThumb, setScrollThumb] = useState<{ heightPct: number; topPct: number } | null>(null);
+  const scrollThumbDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startScrollTop: number;
+  } | null>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    frontNoteId: string;
+  } | null>(null);
+  /** Live dimensions while dragging — avoids persisting on every pointermove. */
+  const [resizeLive, setResizeLive] = useState<{ w: number; h: number } | null>(null);
+
+  const scrollAreaId = `cluster-front-${id}`;
+
   const notes = data.notes ?? [];
-  // Cap the visible stack at 3 layers.
-  const stackLayers = Math.min(notes.length, 3);
-  const frontNote = notes[0];
+  const leafCount = countLeafNotes(notes);
+  const stackLayers = Math.min(leafCount, 3);
+  const stackNotes = leafPrefixInMemberOrder(notes, stackLayers);
+  const frontNote = firstLeafNote(notes);
+  const frontFmt = frontNote?.formatting ?? {};
+  const frontFontSize: NoteFontSize = frontFmt.fontSize ?? "md";
+  const frontPreviewClasses = [
+    FONT_SIZE_CLASSES[frontFontSize],
+    frontFmt.bold ? "font-bold" : "",
+    frontFmt.italic ? "italic" : "",
+    frontFmt.underline ? "underline" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const cardWidth = resizeLive?.w ?? resolveNoteWidth(frontNote);
+  const cardHeight = resizeLive?.h ?? resolveNoteHeight(frontNote);
+  const peekPadding = clusterPeekPadding(leafCount);
   // Front card + handles follow the top note; fall back to cluster colorKey for older data.
   const frontColorKey = frontNote?.colorKey ?? data.colorKey ?? DEFAULT_NOTE_COLOR;
   const frontPalette = NOTE_COLOR_META[frontColorKey];
   const isDropTarget = !!data.isDropTarget;
+  const filterDimmed =
+    categoryFilter !== null &&
+    !clusterMembersMatchFilter(notes, data.colorKey, categoryFilter);
+  const searchDimmed =
+    search.dimNonMatches && !search.clusterHasPassiveOrActiveMatch(id);
+  const outerDimmed = filterDimmed || searchDimmed;
 
-  const handlePaint: CSSProperties = {
-    backgroundColor: frontPalette.handleColor,
-    borderColor: frontPalette.handleColor,
-    zIndex: 50,
+  const activeMatch =
+    search.matches.length > 0 ? search.matches[search.activeIndex] : undefined;
+  const activeClusterSearch =
+    search.dimNonMatches &&
+    activeMatch?.kind === "cluster" &&
+    activeMatch.clusterId === id;
+  const passiveClusterSearch =
+    search.dimNonMatches &&
+    search.clusterHasPassiveOrActiveMatch(id) &&
+    !activeClusterSearch;
+
+  let frontRing = "ring-transparent";
+  if (isDropTarget) frontRing = `${frontPalette.selectedRing} shadow-lg scale-[1.03]`;
+  else if (activeClusterSearch) frontRing = `${frontPalette.selectedRing} z-[1] shadow-lg scale-[1.02]`;
+  else if (selected) frontRing = `${frontPalette.selectedRing} shadow-lg`;
+  else if (passiveClusterSearch) frontRing = `${frontPalette.selectedRing}`;
+
+  const enterEditMode = () => {
+    if (!frontNote) return;
+    pushSnapshot();
+    setEditing(true);
+    requestAnimationFrame(() => textareaRef.current?.focus());
   };
+
+  const exitEditMode = () => setEditing(false);
+
+  const updateFrontNoteBody = (body: string) => {
+    if (!frontNote) return;
+    updateNodeData(id, {
+      notes: updateLeafNoteInMembers(notes, frontNote.id, { body }),
+    });
+  };
+
+  const syncTextareaHeight = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "0px";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, []);
+
+  const refreshScrollThumb = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollHeight, clientHeight, scrollTop } = el;
+    if (scrollHeight <= clientHeight + 1) {
+      setScrollThumb(null);
+      return;
+    }
+    const heightPct = (clientHeight / scrollHeight) * 100;
+    const maxTop = 100 - heightPct;
+    const topPct = maxTop > 0 ? (scrollTop / (scrollHeight - clientHeight)) * maxTop : 0;
+    setScrollThumb({ heightPct, topPct });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (editing) syncTextareaHeight();
+    refreshScrollThumb();
+  }, [editing, frontNote?.body, syncTextareaHeight, refreshScrollThumb, cardWidth, cardHeight, frontPreviewClasses]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(refreshScrollThumb);
+    ro.observe(el);
+    el.addEventListener("scroll", refreshScrollThumb, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", refreshScrollThumb);
+    };
+  }, [refreshScrollThumb, editing]);
+
+  const onScrollAreaWheel = (e: React.WheelEvent) => {
+    e.stopPropagation();
+    const el = scrollRef.current;
+    if (!el || el.scrollHeight <= el.clientHeight + 1) return;
+    el.scrollTop += e.deltaY;
+  };
+
+  const scrollByTrackPointer = useCallback(
+    (clientY: number, startScrollTop: number, startClientY: number) => {
+      const el = scrollRef.current;
+      const track = scrollTrackRef.current;
+      if (!el || !track || !scrollThumb) return;
+      const trackHeight = track.clientHeight;
+      const thumbTravel = trackHeight * (1 - scrollThumb.heightPct / 100);
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll <= 0 || thumbTravel <= 0) return;
+      const dy = clientY - startClientY;
+      el.scrollTop = Math.min(maxScroll, Math.max(0, startScrollTop + (dy / thumbTravel) * maxScroll));
+    },
+    [scrollThumb],
+  );
+
+  const onScrollTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = scrollRef.current;
+    const track = scrollTrackRef.current;
+    if (!el || !track || !scrollThumb) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const yInTrack = e.clientY - trackRect.top;
+    const thumbHeightPx = (scrollThumb.heightPct / 100) * trackRect.height;
+    const thumbTopPx = (scrollThumb.topPct / 100) * trackRect.height;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+
+    if (yInTrack < thumbTopPx || yInTrack > thumbTopPx + thumbHeightPx) {
+      const scrollRatio = (yInTrack - thumbHeightPx / 2) / Math.max(1, trackRect.height - thumbHeightPx);
+      el.scrollTop = Math.min(maxScroll, Math.max(0, scrollRatio * maxScroll));
+    }
+
+    scrollThumbDragRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      startScrollTop: el.scrollTop,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onScrollTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollThumbDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    scrollByTrackPointer(e.clientY, drag.startScrollTop, drag.startY);
+  };
+
+  const onScrollTrackPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scrollThumbDragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    scrollThumbDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const scrollAreaClass = `note-card-scroll min-h-0 flex-1 overflow-x-hidden ${
+    scrollThumb ? "note-card-scroll--overflow" : "overflow-y-hidden"
+  }`;
 
   const openPanel = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -59,9 +250,6 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
     );
   };
 
-  // Peek height: extra top space so back cards are visible above the front card.
-  const peekPadding = stackLayers > 1 ? 12 : 0;
-
   // React Flow caches handle positions on the node and only recomputes them when width/height
   // change. Our handles sit on the inner front card, so we must force a remeasure when layout
   // can shift without changing the outer node's offset dimensions (e.g. stack peek, preview text).
@@ -71,24 +259,78 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
     id,
     updateNodeInternals,
     notes.length,
+    leafCount,
     peekPadding,
     stackLayers,
+    frontNote?.id,
     frontNote?.body,
+    frontNote?.width,
+    frontNote?.height,
+    frontPreviewClasses,
+    editing,
     selected,
     isDropTarget,
   ]);
 
+  const onResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!frontNote) return;
+    e.stopPropagation();
+    e.preventDefault();
+    pushSnapshot();
+    resizeRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: cardWidth,
+      startH: cardHeight,
+      frontNoteId: frontNote.id,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = resizeRef.current;
+    if (!r || e.pointerId !== r.pointerId) return;
+    const zoom = getZoom();
+    const dw = (e.clientX - r.startX) / zoom;
+    const dh = (e.clientY - r.startY) / zoom;
+    setResizeLive({
+      w: clampNoteWidth(r.startW + dw),
+      h: clampNoteHeight(r.startH + dh),
+    });
+  };
+
+  const onResizePointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = resizeRef.current;
+    if (!r || e.pointerId !== r.pointerId) return;
+    const nextW = clampNoteWidth(r.startW + (e.clientX - r.startX) / getZoom());
+    const nextH = clampNoteHeight(r.startH + (e.clientY - r.startY) / getZoom());
+    resizeRef.current = null;
+    setResizeLive(null);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    updateNodeData(id, {
+      notes: updateLeafNoteInMembers(notes, r.frontNoteId, {
+        width: nextW,
+        height: nextH,
+      }),
+    });
+    updateNodeInternals(id);
+  };
+
   return (
     <>
+      <NoteCardScrollbarStyles nodeId={scrollAreaId} handleClass={frontPalette.handleClass} />
       <div
-        className="relative"
-        style={{ width: 240, paddingTop: peekPadding }}
+        className={`relative transition-opacity ${outerDimmed ? "opacity-[0.38]" : ""}`}
+        style={{ width: cardWidth, paddingTop: peekPadding }}
       >
         {/* Back cards — one per stack layer behind the front; each uses that note's color. */}
         {Array.from({ length: stackLayers - 1 }).map((_, i) => {
           // i = 0 is furthest back → last visible note in the capped stack (e.g. notes[2] when 3+ notes).
           const noteIndex = stackLayers - 1 - i;
-          const backNote = notes[noteIndex];
+          const backNote = stackNotes[noteIndex];
           const backKey = backNote?.colorKey ?? DEFAULT_NOTE_COLOR;
           const backPalette = NOTE_COLOR_META[backKey];
           return (
@@ -100,25 +342,31 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
                 transform: BACK_CARD_TRANSFORMS[i],
                 zIndex: i,
               }}
-              className={`rounded-lg border ${backPalette.cardClass}`}
+              className={`rounded-lg ${backPalette.cardClass}`}
             />
           );
         })}
 
         {/* Front card */}
         <div
-          className={`relative rounded-lg border shadow-md ring-2 ring-offset-2 transition-all ${frontPalette.cardClass} ${isDropTarget ? `${frontPalette.selectedRing} shadow-lg scale-[1.03]` : selected ? `${frontPalette.selectedRing} shadow-lg` : "ring-transparent"}`}
-          style={{ zIndex: stackLayers }}
+          onDoubleClick={!editing && frontNote ? enterEditMode : undefined}
+          className={`relative flex flex-col overflow-hidden rounded-lg border shadow-md ${activeClusterSearch ? "ring-4" : "ring-2"} ring-offset-2 ring-offset-white transition-[opacity,transform,box-shadow] dark:ring-offset-neutral-900 ${frontPalette.cardClass} ${frontRing} ${editing ? "cursor-default" : ""}`}
+          style={{ zIndex: stackLayers, height: CLUSTER_HEADER_HEIGHT + cardHeight }}
         >
           {/* Header row: note count + expand button */}
-          <div className="flex items-center justify-between px-3 pt-2">
-            <span className="text-xs font-medium opacity-50">
-              {notes.length} {notes.length === 1 ? "note" : "notes"}
-            </span>
+          <div className="flex shrink-0 items-center justify-between px-3 pt-2">
+            {stackNotes.length === 0 ? (
+              <span className="text-xs font-medium opacity-50">0 notes</span>
+            ) : (
+              <span className="text-xs font-medium opacity-50">
+                {leafCount} {leafCount === 1 ? "note" : "notes"}
+              </span>
+            )}
             <button
               type="button"
               title="Expand cluster"
               onClick={openPanel}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="nodrag flex h-6 w-6 items-center justify-center rounded-md opacity-40 transition-opacity hover:opacity-80"
             >
               {/* Expand icon */}
@@ -131,22 +379,98 @@ function ClusterNode({ id, data, selected }: NodeProps<ClusterFlowNode>) {
             </button>
           </div>
 
-          {/* First note preview */}
-          <p className="min-h-[88px] select-none whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed opacity-75">
-            {frontNote?.body || (
-              <span className="opacity-40 italic">Note...</span>
+          {/* First note — dimensions match the top inner note */}
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div
+              ref={scrollRef}
+              data-note-scroll={scrollAreaId}
+              onWheel={onScrollAreaWheel}
+              className={scrollAreaClass}
+            >
+              {editing && frontNote ? (
+                <textarea
+                  ref={textareaRef}
+                  value={frontNote.body}
+                  onChange={(e) => {
+                    updateFrontNoteBody(e.target.value);
+                    syncTextareaHeight();
+                    requestAnimationFrame(refreshScrollThumb);
+                  }}
+                  onBlur={exitEditMode}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      exitEditMode();
+                    }
+                  }}
+                  placeholder="Note…"
+                  rows={1}
+                  className={`nodrag nopan block w-full cursor-text resize-none overflow-hidden bg-transparent px-3 py-2 pr-4 outline-none placeholder:text-current/45 ${frontPreviewClasses}`}
+                  spellCheck
+                />
+              ) : (
+                <p
+                  className={`select-none whitespace-pre-wrap break-words px-3 py-2 pr-4 opacity-75 empty:after:text-current/45 empty:after:content-['Note…'] ${frontPreviewClasses}`}
+                >
+                  {frontNote?.body}
+                </p>
+              )}
+            </div>
+
+            {scrollThumb && (
+              <div
+                ref={scrollTrackRef}
+                role="scrollbar"
+                aria-orientation="vertical"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(scrollThumb.topPct)}
+                className="nodrag nopan absolute bottom-0 right-0 top-0 z-10 w-3 cursor-grab touch-none active:cursor-grabbing"
+                onPointerDown={onScrollTrackPointerDown}
+                onPointerMove={onScrollTrackPointerMove}
+                onPointerUp={onScrollTrackPointerEnd}
+                onPointerCancel={onScrollTrackPointerEnd}
+              >
+                <div
+                  data-note-scroll-thumb={scrollAreaId}
+                  className="pointer-events-none absolute right-1 w-1 rounded-full opacity-80"
+                  style={{
+                    height: `${scrollThumb.heightPct}%`,
+                    top: `${scrollThumb.topPct}%`,
+                  }}
+                />
+              </div>
             )}
-          </p>
+          </div>
+
+          {selected && frontNote && !editing && (
+            <div
+              role="separator"
+              aria-label="Resize cluster"
+              title="Drag to resize (applies to top note)"
+              className="nodrag nopan absolute bottom-0 right-0 z-10 flex h-5 w-5 cursor-se-resize items-end justify-end rounded-br-lg pb-0.5 pr-0.5 text-current/45 opacity-70 transition-opacity hover:text-current/70 hover:opacity-100"
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerEnd}
+              onPointerCancel={onResizePointerEnd}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden>
+                <circle cx="8.5" cy="8.5" r="1" />
+                <circle cx="5.5" cy="8.5" r="1" />
+                <circle cx="8.5" cy="5.5" r="1" />
+              </svg>
+            </div>
+          )}
 
           {/* Handles pinned to the front card only (relative containing block); above stack layers */}
-          <Handle id="t"  type="source" position={Position.Top}    style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="b"  type="source" position={Position.Bottom} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="l"  type="source" position={Position.Left}  style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="r"  type="source" position={Position.Right} style={handlePaint} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="tl" type="source" position={Position.Top}    style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="tr" type="source" position={Position.Top}    style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="bl" type="source" position={Position.Bottom} style={{ ...handlePaint, left: 0 }} className="!h-2 !w-2 !rounded-full !border" />
-          <Handle id="br" type="source" position={Position.Bottom} style={{ ...handlePaint, left: "100%" }} className="!h-2 !w-2 !rounded-full !border" />
+          <Handle id="t"  type="source" position={Position.Top}    className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="b"  type="source" position={Position.Bottom} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="l"  type="source" position={Position.Left}  className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="r"  type="source" position={Position.Right} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="tl" type="source" position={Position.Top}    style={{ left: 0 }}      className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="tr" type="source" position={Position.Top}    style={{ left: "100%" }} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="bl" type="source" position={Position.Bottom} style={{ left: 0 }}      className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
+          <Handle id="br" type="source" position={Position.Bottom} style={{ left: "100%" }} className={`!z-50 !h-2 !w-2 !rounded-full !border ${frontPalette.handleClass}`} />
         </div>
       </div>
 

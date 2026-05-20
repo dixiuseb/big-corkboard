@@ -1,15 +1,17 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   ConnectionMode,
   ConnectionLineType,
+  SelectionMode,
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStoreApi,
   addEdge,
   type Connection,
   type Edge,
@@ -30,8 +32,8 @@ import ClusterNode, {
 } from "@/components/ClusterNode";
 import { BoardEdge, type BoardEdgeType, type EdgeDirection } from "@/components/BoardEdge";
 import { ClusterPanel } from "@/components/ClusterPanel";
-import { Toolbar } from "@/components/Toolbar";
-import { DEFAULT_NOTE_COLOR, type NoteColorKey } from "@/lib/noteColors";
+import { Toolbar, type WorkspaceFileMenuActions, type CanvasTool } from "@/components/Toolbar";
+import { DEFAULT_NOTE_COLOR, normalizeNoteColorKey, type NoteColorKey } from "@/lib/noteColors";
 import { UndoContext } from "@/lib/UndoContext";
 import {
   loadBoardsMeta,
@@ -42,17 +44,69 @@ import {
   loadActiveBoard,
   saveActiveBoard,
   type BoardMeta,
+  type BoardColorLabels,
   type PersistedBoardState,
 } from "@/lib/persistence";
 import { BoardTabs } from "@/components/BoardTabs";
+import { ColorLegend } from "@/components/ColorLegend";
+import { CategoryFilterContext } from "@/lib/CategoryFilterContext";
+import { SearchContext, buildSearchSessionValue } from "@/lib/SearchContext";
+import { buildSearchMatches } from "@/lib/searchMatches";
+import { BoardSearchBar } from "@/components/BoardSearchBar";
+import { SearchMatchViewport } from "@/components/SearchMatchViewport";
+import {
+  downloadWorkspaceJson,
+  parseWorkspaceImportJson,
+  applyWorkspaceImport,
+  WORKSPACE_MAX_BOARDS,
+} from "@/lib/workspaceJson";
+import {
+  appendFlattenedClusterMembers,
+  appendNestedCluster,
+  clusterCanvasToNestedMember,
+  countLeafNotes,
+  findLeafNote,
+  firstLeafNote,
+  flattenLeafNotes,
+  isNestedClusterMember,
+  isNoteInsideNestedCluster,
+  mapMembersTransformNotes,
+  normalizeClusterMembers,
+  removeLeafNoteFromMembers,
+  updateLeafNoteInMembers,
+  type ClusterMember,
+  type ClusterNestedMember,
+} from "@/lib/clusterMembers";
+import { DEFAULT_NOTE_WIDTH, resolveClusterOuterSize, resolveNoteHeight, resolveNoteWidth } from "@/lib/noteDimensions";
+import { resolveNoteFitDimensions } from "@/lib/noteFitDimensions";
 
 type BoardNode = NoteFlowNode | ClusterFlowNode;
+
+function boardNodeSize(n: BoardNode | Node): { w: number; h: number } {
+  if (n.type === "clusterNode") {
+    const cluster = n as ClusterFlowNode;
+    const members = normalizeClusterMembers(cluster.data.notes as unknown);
+    const { width, height } = resolveClusterOuterSize(firstLeafNote(members), countLeafNotes(members));
+    return {
+      w: n.measured?.width ?? width,
+      h: n.measured?.height ?? height,
+    };
+  }
+  if (n.type === "noteCard") {
+    const note = n as NoteFlowNode;
+    return {
+      w: n.measured?.width ?? resolveNoteWidth(note.data),
+      h: n.measured?.height ?? resolveNoteHeight(note.data),
+    };
+  }
+  return { w: 240, h: 120 };
+}
 
 type ContextMenu = { edgeId: string; x: number; y: number };
 
 const DIRECTION_CYCLE: EdgeDirection[] = ["none", "forward", "reverse", "both"];
 
-type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[] };
+type Snapshot = { nodes: BoardNode[]; edges: BoardEdgeType[]; colorLabels: BoardColorLabels };
 const MAX_HISTORY = 50;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -77,6 +131,21 @@ function serializeEdges(edges: BoardEdgeType[]): object[] {
   return edges.map(({ id, source, target, sourceHandle, targetHandle, type, data }) => ({
     id, source, target, sourceHandle, targetHandle, type, data,
   }));
+}
+
+/** Normalize cluster `data.notes` to `ClusterMember[]` when loading from storage. */
+function normalizePersistedBoardNodes(nodes: BoardNode[]): BoardNode[] {
+  return nodes.map((n) => {
+    if (n.type !== "clusterNode") return n;
+    const c = n as ClusterFlowNode;
+    return {
+      ...c,
+      data: {
+        ...c.data,
+        notes: normalizeClusterMembers(c.data.notes as unknown),
+      },
+    };
+  });
 }
 
 /** Point every edge that used oldId at newId; drop self-loops; merge duplicate endpoint pairs. */
@@ -118,18 +187,87 @@ function SFPCapture({ sfpRef }: { sfpRef: React.MutableRefObject<SFPFn | null> }
   return null;
 }
 
+/** Clears a stuck Shift-marquee overlay when pointerup happens outside the flow pane. */
+function BoardUserSelectionPointerFlush() {
+  const store = useStoreApi();
+  useEffect(() => {
+    const flushStuckUserSelection = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = store.getState() as any;
+      if (s.userSelectionActive || s.userSelectionRect != null) {
+        store.setState({ userSelectionActive: false, userSelectionRect: null });
+      }
+    };
+    window.addEventListener("pointerup", flushStuckUserSelection);
+    window.addEventListener("pointercancel", flushStuckUserSelection);
+    return () => {
+      window.removeEventListener("pointerup", flushStuckUserSelection);
+      window.removeEventListener("pointercancel", flushStuckUserSelection);
+    };
+  }, [store]);
+  return null;
+}
+
 // ── BoardCanvas ──────────────────────────────────────────────────────────────
 // Renders the React Flow canvas for a single board. Keyed by boardId in the
 // outer Board shell so React remounts it cleanly whenever the active board changes.
 
-function BoardCanvas({ boardId }: { boardId: string }) {
+function BoardCanvas({
+  boardId,
+  boardTitle,
+  workspaceFile,
+}: {
+  boardId: string;
+  boardTitle: string;
+  workspaceFile: WorkspaceFileMenuActions;
+}) {
   const [savedState] = useState<PersistedBoardState | null>(() => loadBoardState(boardId));
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>(
-    (savedState?.nodes ?? []) as BoardNode[],
+    normalizePersistedBoardNodes((savedState?.nodes ?? []) as BoardNode[]),
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState<BoardEdgeType>(
     (savedState?.edges ?? []) as BoardEdgeType[],
+  );
+
+  const [colorLabels, setColorLabels] = useState<BoardColorLabels>(
+    () => savedState?.colorLabels ?? {},
+  );
+  const colorLabelsRef = useRef(colorLabels);
+  useEffect(() => {
+    colorLabelsRef.current = colorLabels;
+  }, [colorLabels]);
+
+  /** Dim canvas nodes that don’t match this note color (legend swatch). */
+  const [categoryFilterColor, setCategoryFilterColor] = useState<NoteColorKey | null>(null);
+  const toggleCategoryFilter = useCallback((key: NoteColorKey) => {
+    setCategoryFilterColor((prev) => (prev === key ? null : key));
+  }, []);
+
+  // ── Search (Cmd/Ctrl+F) ───────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      setDebouncedSearchQuery("");
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchInput.trim().toLowerCase());
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [searchInput, searchOpen]);
+
+  useEffect(() => {
+    setSearchActiveIndex(0);
+  }, [debouncedSearchQuery]);
+
+  const searchMatches = useMemo(
+    () => buildSearchMatches(nodes, debouncedSearchQuery),
+    [nodes, debouncedSearchQuery],
   );
 
   const defaultViewport = savedState?.viewport ?? DEFAULT_VIEWPORT;
@@ -145,6 +283,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport: viewportRef.current,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, []);
 
@@ -155,10 +294,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         nodes: serializeNodes(nodes),
         edges: serializeEdges(edges),
         viewport: viewportRef.current,
+        colorLabels: { ...colorLabelsRef.current },
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [nodes, edges, boardId]);
+  }, [nodes, edges, colorLabels, boardId]);
 
   const onMoveEnd = useCallback((_: unknown, viewport: Viewport) => {
     viewportRef.current = viewport;
@@ -167,6 +307,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       nodes: serializeNodes(nodesRef.current),
       edges: serializeEdges(edgesRef.current),
       viewport,
+      colorLabels: { ...colorLabelsRef.current },
     });
   }, [boardId]);
 
@@ -182,6 +323,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   // Always-fresh refs so drag/keyboard callbacks never capture stale state.
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const setSelectedPanelNoteIdRef = useRef<(id: string | null) => void>(() => {});
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
@@ -200,10 +342,41 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
+  /** Drag-start position of the cluster being merged (set when nest dialog opens). */
+  const nestMergeDragBaselineRef = useRef<{ draggedId: string; position: XYPosition } | null>(null);
+
   const pushSnapshot = useCallback(() => {
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     // Any new action clears the redo branch.
+    redoStack.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, []);
+
+  /** Undo baseline for nest/flatten: two clusters again, with dragged cluster back where it was before this drag (same as cancel). */
+  const pushNestMergeUndoBaseline = useCallback((draggedClusterId: string) => {
+    const baseline = nestMergeDragBaselineRef.current;
+    nestMergeDragBaselineRef.current = null;
+
+    const nodesCopy = structuredClone(nodesRef.current) as BoardNode[];
+    const edgesCopy = structuredClone(edgesRef.current) as BoardEdgeType[];
+
+    if (baseline?.draggedId === draggedClusterId) {
+      const n = nodesCopy.find((x) => x.id === draggedClusterId);
+      if (n) n.position = { ...baseline.position };
+    }
+
+    undoStack.current.push({
+      nodes: nodesCopy,
+      edges: edgesCopy,
+      colorLabels: { ...colorLabelsRef.current },
+    });
+    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     redoStack.current = [];
     setCanUndo(true);
     setCanRedo(false);
@@ -212,24 +385,34 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const undo = useCallback(() => {
     if (undoStack.current.length === 0) return;
     // Save current live state so redo can return here.
-    redoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    redoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = undoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(undoStack.current.length > 0);
     setCanRedo(true);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   const redo = useCallback(() => {
     if (redoStack.current.length === 0) return;
     // Save current live state so undo can return here.
-    undoStack.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+    undoStack.current.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      colorLabels: { ...colorLabelsRef.current },
+    });
     const snap = redoStack.current.pop()!;
     setNodes(snap.nodes);
     setEdges(snap.edges);
+    setColorLabels({ ...(snap.colorLabels ?? {}) });
     setCanUndo(true);
     setCanRedo(redoStack.current.length > 0);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setColorLabels]);
 
   // ── Drag-to-pin state ─────────────────────────────────────────────────────
   const prevDropTargetRef = useRef<string | null>(null);
@@ -237,6 +420,13 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   // ── Connection mode ────────────────────────────────────────────────────────
   const [connecting, setConnecting] = useState(false);
   const toggleConnecting = useCallback(() => setConnecting((v) => !v), []);
+
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>("pan");
+
+  type NestClusterDialog = null | { draggedClusterId: string; targetClusterId: string };
+  const [nestClusterDialog, setNestClusterDialog] = useState<NestClusterDialog>(null);
+  const nestClusterDialogRef = useRef<NestClusterDialog>(null);
+  nestClusterDialogRef.current = nestClusterDialog;
 
   // ── Default note settings (applied to new notes; updated when editing any note) ──
   const [defaultSettings, setDefaultSettings] = useState<{
@@ -289,6 +479,38 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     closeContextMenu();
   }, [setEdges, closeContextMenu, pushSnapshot]);
 
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchInput("");
+    setDebouncedSearchQuery("");
+    setSearchActiveIndex(0);
+    setConnecting(false);
+    setContextMenu(null);
+  }, [setConnecting, setContextMenu]);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+  }, []);
+
+  const goSearchNext = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i + 1) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const goSearchPrev = useCallback(() => {
+    setSearchActiveIndex((i) => {
+      if (searchMatches.length === 0) return 0;
+      return (i - 1 + searchMatches.length) % searchMatches.length;
+    });
+  }, [searchMatches.length]);
+
+  const searchSessionValue = useMemo(
+    () => buildSearchSessionValue(searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex),
+    [searchOpen, debouncedSearchQuery, searchMatches, searchActiveIndex],
+  );
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -305,9 +527,32 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         return;
       }
 
+      if (isCmd && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+
       if (e.key === "Escape") {
+        if (searchOpen) {
+          closeSearch();
+          return;
+        }
+        const ae = document.activeElement as HTMLElement | null;
+        const inEditable =
+          ae &&
+          (ae.tagName === "INPUT" ||
+            ae.tagName === "TEXTAREA" ||
+            ae.tagName === "SELECT" ||
+            ae.isContentEditable);
+        if (inEditable) return;
+
         setConnecting(false);
         setContextMenu(null);
+        setCategoryFilterColor(null);
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+        setEdges((eds) => eds.map((ed) => ({ ...ed, selected: false })));
+        setSelectedPanelNoteIdRef.current(null);
         return;
       }
 
@@ -344,7 +589,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undo, redo, pushSnapshot, setNodes, setEdges]);
+  }, [undo, redo, pushSnapshot, setNodes, setEdges, searchOpen, closeSearch]);
 
   // ── Cluster panel state ────────────────────────────────────────────────────
   const expandedCluster = useMemo(
@@ -373,15 +618,14 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     (noteId: string, update: Partial<ClusterNoteItem>) => {
       if (!expandedCluster) return;
       updateClusterNodes(expandedCluster.id, (n) => {
-        const nextNotes = n.data.notes.map((note) =>
-          note.id === noteId ? { ...note, ...update } : note,
-        );
+        const members = normalizeClusterMembers(n.data.notes as unknown);
+        const nextNotes = updateLeafNoteInMembers(members, noteId, update);
         return {
           ...n,
           data: {
             ...n.data,
             notes: nextNotes,
-            colorKey: nextNotes[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+            colorKey: firstLeafNote(nextNotes)?.colorKey ?? n.data.colorKey ?? DEFAULT_NOTE_COLOR,
           },
         };
       });
@@ -393,7 +637,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     (noteId: string) => {
       if (!expandedCluster) return;
       pushSnapshot();
-      const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
+      const members = normalizeClusterMembers(expandedCluster.data.notes as unknown);
+      const remaining = removeLeafNoteFromMembers(members, noteId);
       if (remaining.length === 0) {
         setNodes((nds) => nds.filter((n) => n.id !== expandedCluster.id));
       } else {
@@ -402,7 +647,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           data: {
             ...n.data,
             notes: remaining,
-            colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+            colorKey: firstLeafNote(remaining)?.colorKey ?? DEFAULT_NOTE_COLOR,
           },
         }));
       }
@@ -413,10 +658,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const handleEjectNote = useCallback(
     (noteId: string) => {
       if (!expandedCluster) return;
-      const note = expandedCluster.data.notes.find((n) => n.id === noteId);
+      const members = normalizeClusterMembers(expandedCluster.data.notes as unknown);
+      const note = findLeafNote(members, noteId);
       if (!note) return;
       pushSnapshot();
-      const remaining = expandedCluster.data.notes.filter((n) => n.id !== noteId);
+      const remaining = removeLeafNoteFromMembers(members, noteId);
       // Place the ejected note just to the left of the cluster so it's immediately visible.
       const ejectPos = {
         x: expandedCluster.position.x - 270,
@@ -426,7 +672,13 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         id: crypto.randomUUID(),
         type: "noteCard",
         position: ejectPos,
-        data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+        data: {
+          body: note.body,
+          colorKey: note.colorKey,
+          formatting: note.formatting,
+          width: note.width,
+          height: note.height,
+        },
       };
       if (remaining.length === 0) {
         // Cluster is now empty — remove it and place just the note.
@@ -437,7 +689,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           data: {
             ...n.data,
             notes: remaining,
-            colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+            colorKey: firstLeafNote(remaining)?.colorKey ?? DEFAULT_NOTE_COLOR,
           },
         }));
         setNodes((nds) => [...nds, looseNote]);
@@ -456,7 +708,9 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (!expandedCluster) return;
     pushSnapshot();
     const { position, data } = expandedCluster;
-    const looseNotes: NoteFlowNode[] = data.notes.map((note, i) => ({
+    const members = normalizeClusterMembers(data.notes as unknown);
+    const leaves = flattenLeafNotes(members);
+    const looseNotes: NoteFlowNode[] = leaves.map((note, i) => ({
       id: i === 0 ? expandedCluster.id : crypto.randomUUID(),
       type: "noteCard" as const,
       position: { x: position.x + i * 30, y: position.y + i * 30 },
@@ -464,6 +718,8 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         body: note.body,
         colorKey: note.colorKey,
         formatting: note.formatting,
+        width: note.width,
+        height: note.height,
       },
     }));
     setNodes((nds) => [
@@ -480,21 +736,28 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       body: "",
       colorKey: expandedCluster.data.colorKey ?? DEFAULT_NOTE_COLOR,
     };
-    updateClusterNodes(expandedCluster.id, (n) => ({
-      ...n,
-      data: { ...n.data, notes: [...n.data.notes, newNote] },
-    }));
+    updateClusterNodes(expandedCluster.id, (n) => {
+      const members = normalizeClusterMembers(n.data.notes as unknown);
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          notes: [...members, newNote],
+          colorKey: firstLeafNote(members)?.colorKey ?? newNote.colorKey,
+        },
+      };
+    });
   }, [expandedCluster, updateClusterNodes, pushSnapshot]);
 
-  const handleReorderNotes = useCallback((reorderedNotes: ClusterNoteItem[]) => {
+  const handleReorderNotes = useCallback((reorderedMembers: ClusterMember[]) => {
     if (!expandedCluster) return;
     pushSnapshot();
     updateClusterNodes(expandedCluster.id, (n) => ({
       ...n,
       data: {
         ...n.data,
-        notes: reorderedNotes,
-        colorKey: reorderedNotes[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+        notes: reorderedMembers,
+        colorKey: firstLeafNote(reorderedMembers)?.colorKey ?? DEFAULT_NOTE_COLOR,
       },
     }));
   }, [expandedCluster, updateClusterNodes, pushSnapshot]);
@@ -502,26 +765,65 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   // ── Panel note selection (lifted from ClusterPanel so the toolbar can see it) ──
   const [selectedPanelNoteId, setSelectedPanelNoteId] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    setSelectedPanelNoteIdRef.current = setSelectedPanelNoteId;
+  }, [setSelectedPanelNoteId]);
+
   // Reset panel selection when the open cluster changes.
   useEffect(() => { setSelectedPanelNoteId(null); }, [expandedCluster?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Which canvas noteCard node is currently selected?
-  const selectedCanvasNote = useMemo(
-    () => nodes.find((n): n is NoteFlowNode => n.type === "noteCard" && !!n.selected) ?? null,
+  // Which canvas nodes (notes + clusters) are selected? Multi-select uses Meta/Ctrl+click or Shift+drag box.
+  const selectedCanvasNodes = useMemo(
+    () =>
+      nodes.filter(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+      ) as BoardNode[],
     [nodes],
   );
 
-  // Which panel note is currently selected?
-  const selectedPanelNote = useMemo(
-    () => expandedCluster?.data.notes.find((n) => n.id === selectedPanelNoteId) ?? null,
-    [expandedCluster, selectedPanelNoteId],
+  const selectedCanvasSignature = useMemo(
+    () => selectedCanvasNodes.map((n) => n.id).join(","),
+    [selectedCanvasNodes],
   );
 
-  // Selecting a canvas note clears the panel selection, and vice versa.
+  /** First selected canvas node in list order — drives toolbar preview for mixed selections. */
+  const primaryCanvasForToolbar = useMemo((): NoteFlowNode | ClusterFlowNode | null => {
+    const idSet = new Set(selectedCanvasNodes.map((n) => n.id));
+    for (const n of nodes) {
+      if (idSet.has(n.id) && (n.type === "noteCard" || n.type === "clusterNode")) {
+        return n as NoteFlowNode | ClusterFlowNode;
+      }
+    }
+    return null;
+  }, [nodes, selectedCanvasNodes]);
+
+  /** True when toolbar "Cluster" can run: canvas promote/combine, or panel wrap of a top-level note into a nested cluster. */
+  const canCreateCluster = useMemo(() => {
+    const s = nodes.filter(
+      (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+    );
+    const canvasOk =
+      (s.length === 1 && s[0].type === "noteCard") ||
+      (s.length >= 2 && s.every((n) => n.type === "noteCard"));
+    if (canvasOk) return true;
+    if (!expandedCluster || !selectedPanelNoteId || s.length > 0) return false;
+    const members = normalizeClusterMembers(expandedCluster.data.notes as unknown);
+    if (isNoteInsideNestedCluster(members, selectedPanelNoteId)) return false;
+    return members.some((m) => !isNestedClusterMember(m) && m.id === selectedPanelNoteId);
+  }, [nodes, expandedCluster, selectedPanelNoteId]);
+
+  // Which panel note is currently selected?
+  const selectedPanelNote = useMemo(() => {
+    if (!expandedCluster || !selectedPanelNoteId) return null;
+    const members = normalizeClusterMembers(expandedCluster.data.notes as unknown);
+    return findLeafNote(members, selectedPanelNoteId) ?? null;
+  }, [expandedCluster, selectedPanelNoteId]);
+
+  // Selecting any canvas node clears the panel selection.
   useEffect(() => {
-    if (selectedCanvasNote) setSelectedPanelNoteId(null);
+    if (selectedCanvasNodes.length > 0) setSelectedPanelNoteId(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCanvasNote?.id]);
+  }, [selectedCanvasSignature]);
 
   // Selecting a panel note deselects all canvas nodes.
   const handleSelectPanelNote = useCallback((noteId: string | null) => {
@@ -531,91 +833,366 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     }
   }, [setNodes]);
 
-  // Settings shown in the toolbar — active note's, or the running default.
-  const toolbarColorKey: NoteColorKey =
-    selectedCanvasNote?.data.colorKey ?? selectedPanelNote?.colorKey ?? defaultSettings.colorKey;
-  const toolbarFormatting: NoteFormatting =
-    selectedCanvasNote?.data.formatting ?? selectedPanelNote?.formatting ?? defaultSettings.formatting;
+  const onSearchClusterInternalActive = useCallback((clusterId: string, noteId: string) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "clusterNode") return n;
+        const expanded = n.id === clusterId;
+        return n.data.expanded === expanded ? n : { ...n, data: { ...n.data, expanded } };
+      }),
+    );
+    setSelectedPanelNoteId(noteId);
+  }, [setNodes]);
+
+  const onSearchCollapseClusters = useCallback(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type === "clusterNode" && n.data.expanded) {
+          return { ...n, data: { ...n.data, expanded: false } };
+        }
+        return n;
+      }),
+    );
+    setSelectedPanelNoteId(null);
+  }, [setNodes]);
+
+  const toolbarColorKey: NoteColorKey = useMemo(() => {
+    if (selectedPanelNote) return selectedPanelNote.colorKey ?? DEFAULT_NOTE_COLOR;
+    const n = primaryCanvasForToolbar;
+    if (!n) return defaultSettings.colorKey;
+    if (n.type === "noteCard") return n.data.colorKey ?? DEFAULT_NOTE_COLOR;
+    const c = n as ClusterFlowNode;
+    const members = normalizeClusterMembers(c.data.notes as unknown);
+    return firstLeafNote(members)?.colorKey ?? c.data.colorKey ?? DEFAULT_NOTE_COLOR;
+  }, [selectedPanelNote, primaryCanvasForToolbar, defaultSettings.colorKey]);
+
+  const toolbarFormatting: NoteFormatting = useMemo(() => {
+    if (selectedPanelNote) return selectedPanelNote.formatting ?? {};
+    const n = primaryCanvasForToolbar;
+    if (!n) return defaultSettings.formatting;
+    if (n.type === "noteCard") return n.data.formatting ?? {};
+    const members = normalizeClusterMembers((n as ClusterFlowNode).data.notes as unknown);
+    return firstLeafNote(members)?.formatting ?? {};
+  }, [selectedPanelNote, primaryCanvasForToolbar, defaultSettings.formatting]);
 
   // ── Toolbar note-formatting callbacks ─────────────────────────────────────
   // Each callback applies the change to the active note (canvas or panel) and
   // also updates defaultSettings so the next new note inherits the preference.
 
-  const handleToolbarColor = useCallback((key: NoteColorKey) => {
-    setDefaultSettings((s) => ({ ...s, colorKey: key }));
-    if (selectedCanvasNote) {
-      pushSnapshot();
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, colorKey: key } } : n,
-        ) as BoardNode[],
+  const handleToolbarColor = useCallback(
+    (key: NoteColorKey) => {
+      setDefaultSettings((s) => ({ ...s, colorKey: key }));
+      const hasCanvas = nodesRef.current.some(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
       );
-    } else if (selectedPanelNote) {
-      pushSnapshot();
-      handleUpdateNote(selectedPanelNote.id, { colorKey: key });
-    }
-  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+      if (hasCanvas) {
+        pushSnapshot();
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (!n.selected) return n;
+            if (n.type === "noteCard") {
+              return { ...n, data: { ...n.data, colorKey: key } };
+            }
+            if (n.type === "clusterNode") {
+              const c = n as ClusterFlowNode;
+              const members = normalizeClusterMembers(c.data.notes as unknown);
+              return {
+                ...c,
+                data: {
+                  ...c.data,
+                  colorKey: key,
+                  notes: mapMembersTransformNotes(members, (note) => ({ ...note, colorKey: key })),
+                },
+              };
+            }
+            return n;
+          }) as BoardNode[],
+        );
+      } else if (selectedPanelNote) {
+        pushSnapshot();
+        handleUpdateNote(selectedPanelNote.id, { colorKey: key });
+      }
+    },
+    [selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote],
+  );
 
-  const handleToolbarFontSize = useCallback((size: NoteFontSize) => {
-    if (selectedCanvasNote) {
-      const newFmt = { ...(selectedCanvasNote.data.formatting ?? {}), fontSize: size };
-      pushSnapshot();
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, formatting: newFmt } } : n,
-        ) as BoardNode[],
+  const handleToolbarFontSize = useCallback(
+    (size: NoteFontSize) => {
+      const hasCanvas = nodesRef.current.some(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
       );
-      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
-    } else if (selectedPanelNote) {
-      const newFmt = { ...(selectedPanelNote.formatting ?? {}), fontSize: size };
-      pushSnapshot();
-      handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
-      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
-    } else {
-      setDefaultSettings((s) => ({ ...s, formatting: { ...s.formatting, fontSize: size } }));
-    }
-  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+      if (hasCanvas) {
+        pushSnapshot();
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (!n.selected) return n;
+            if (n.type === "noteCard") {
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  formatting: { ...(n.data.formatting ?? {}), fontSize: size },
+                },
+              };
+            }
+            if (n.type === "clusterNode") {
+              const c = n as ClusterFlowNode;
+              const members = normalizeClusterMembers(c.data.notes as unknown);
+              return {
+                ...c,
+                data: {
+                  ...c.data,
+                  notes: mapMembersTransformNotes(members, (note) => ({
+                    ...note,
+                    formatting: { ...(note.formatting ?? {}), fontSize: size },
+                  })),
+                },
+              };
+            }
+            return n;
+          }) as BoardNode[],
+        );
+        const primary = primaryCanvasForToolbar;
+        if (primary?.type === "noteCard") {
+          setDefaultSettings((s) => ({
+            ...s,
+            formatting: { ...(primary.data.formatting ?? {}), fontSize: size },
+          }));
+        } else if (primary?.type === "clusterNode") {
+          const members = normalizeClusterMembers((primary as ClusterFlowNode).data.notes as unknown);
+          const note = firstLeafNote(members);
+          setDefaultSettings((s) => ({
+            ...s,
+            formatting: { ...(note?.formatting ?? {}), fontSize: size },
+          }));
+        }
+      } else if (selectedPanelNote) {
+        const newFmt = { ...(selectedPanelNote.formatting ?? {}), fontSize: size };
+        pushSnapshot();
+        handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
+        setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+      } else {
+        setDefaultSettings((s) => ({ ...s, formatting: { ...s.formatting, fontSize: size } }));
+      }
+    },
+    [selectedPanelNote, primaryCanvasForToolbar, pushSnapshot, setNodes, handleUpdateNote],
+  );
 
-  const handleToolbarToggleFormat = useCallback((key: keyof Omit<NoteFormatting, "fontSize">) => {
-    if (selectedCanvasNote) {
-      const newFmt = { ...(selectedCanvasNote.data.formatting ?? {}), [key]: !selectedCanvasNote.data.formatting?.[key] };
+  const handleToolbarToggleFormat = useCallback(
+    (key: keyof Omit<NoteFormatting, "fontSize">) => {
+      const nds = nodesRef.current;
+      const selected = nds.filter(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+      );
+      const onlyOneCanvas = selected.length === 1;
+      const hasCanvas = selected.length > 0;
+      if (hasCanvas) {
+        pushSnapshot();
+        setNodes((cur) =>
+          cur.map((n) => {
+            if (!n.selected) return n;
+            if (n.type === "noteCard") {
+              const newFmt = {
+                ...(n.data.formatting ?? {}),
+                [key]: !n.data.formatting?.[key],
+              };
+              return { ...n, data: { ...n.data, formatting: newFmt } };
+            }
+            if (n.type === "clusterNode") {
+              const c = n as ClusterFlowNode;
+              const members = normalizeClusterMembers(c.data.notes as unknown);
+              return {
+                ...c,
+                data: {
+                  ...c.data,
+                  notes: mapMembersTransformNotes(members, (note) => {
+                    const newFmt = {
+                      ...(note.formatting ?? {}),
+                      [key]: !note.formatting?.[key],
+                    };
+                    return { ...note, formatting: newFmt };
+                  }),
+                },
+              };
+            }
+            return n;
+          }) as BoardNode[],
+        );
+        if (onlyOneCanvas) {
+          const n = selected[0];
+          if (n.type === "noteCard") {
+            const newFmt = {
+              ...(n.data.formatting ?? {}),
+              [key]: !n.data.formatting?.[key],
+            };
+            setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+          } else {
+            const members = normalizeClusterMembers((n as ClusterFlowNode).data.notes as unknown);
+            const note = firstLeafNote(members);
+            if (note) {
+              const newFmt = { ...(note.formatting ?? {}), [key]: !note.formatting?.[key] };
+              setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+            }
+          }
+        }
+      } else if (selectedPanelNote) {
+        const newFmt = {
+          ...(selectedPanelNote.formatting ?? {}),
+          [key]: !selectedPanelNote.formatting?.[key],
+        };
+        pushSnapshot();
+        handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
+        setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
+      } else {
+        setDefaultSettings((s) => ({
+          ...s,
+          formatting: { ...s.formatting, [key]: !s.formatting[key as keyof NoteFormatting] },
+        }));
+      }
+    },
+    [selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote],
+  );
+
+  const handleToolbarResizeToFit = useCallback(() => {
+    const hasCanvas = nodesRef.current.some(
+      (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+    );
+    if (hasCanvas) {
       pushSnapshot();
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === selectedCanvasNote.id ? { ...n, data: { ...n.data, formatting: newFmt } } : n,
-        ) as BoardNode[],
+        nds.map((n) => {
+          if (!n.selected) return n;
+          if (n.type === "noteCard") {
+            const fit = resolveNoteFitDimensions(n.data.body, n.data.formatting, n.data);
+            return { ...n, data: { ...n.data, width: fit.width, height: fit.height } };
+          }
+          if (n.type === "clusterNode") {
+            const c = n as ClusterFlowNode;
+            const members = normalizeClusterMembers(c.data.notes as unknown);
+            const front = firstLeafNote(members);
+            if (!front) return c;
+            const fit = resolveNoteFitDimensions(front.body, front.formatting, front);
+            return {
+              ...c,
+              data: {
+                ...c.data,
+                notes: updateLeafNoteInMembers(members, front.id, {
+                  width: fit.width,
+                  height: fit.height,
+                }),
+              },
+            };
+          }
+          return n;
+        }) as BoardNode[],
       );
-      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
     } else if (selectedPanelNote) {
-      const newFmt = { ...(selectedPanelNote.formatting ?? {}), [key]: !selectedPanelNote.formatting?.[key] };
       pushSnapshot();
-      handleUpdateNote(selectedPanelNote.id, { formatting: newFmt });
-      setDefaultSettings((s) => ({ ...s, formatting: newFmt }));
-    } else {
-      setDefaultSettings((s) => ({ ...s, formatting: { ...s.formatting, [key]: !s.formatting[key as keyof NoteFormatting] } }));
+      const fit = resolveNoteFitDimensions(
+        selectedPanelNote.body,
+        selectedPanelNote.formatting,
+        selectedPanelNote,
+      );
+      handleUpdateNote(selectedPanelNote.id, { width: fit.width, height: fit.height });
     }
-  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
+  }, [selectedPanelNote, pushSnapshot, setNodes, handleUpdateNote]);
 
   const handleToolbarDelete = useCallback(() => {
-    if (selectedCanvasNote) {
+    const ids = new Set(
+      nodesRef.current
+        .filter((n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"))
+        .map((n) => n.id),
+    );
+    if (ids.size > 0) {
       pushSnapshot();
-      setNodes((nds) => nds.filter((n) => n.id !== selectedCanvasNote.id) as BoardNode[]);
+      setNodes((nds) => nds.filter((n) => !ids.has(n.id)) as BoardNode[]);
       setEdges((eds) =>
-        eds.filter(
-          (ed) => ed.source !== selectedCanvasNote.id && ed.target !== selectedCanvasNote.id,
-        ) as BoardEdgeType[],
+        eds.filter((ed) => !ids.has(ed.source) && !ids.has(ed.target)) as BoardEdgeType[],
       );
     } else if (selectedPanelNote) {
       handleDeleteNote(selectedPanelNote.id);
     }
-  }, [selectedCanvasNote, selectedPanelNote, pushSnapshot, setNodes, setEdges, handleDeleteNote]);
+  }, [selectedPanelNote, pushSnapshot, setNodes, setEdges, handleDeleteNote]);
 
   const handleToolbarCreateCluster = useCallback(() => {
-    if (!selectedCanvasNote) return;
+    const nds = nodesRef.current;
+    const selected = nds.filter(
+      (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+    );
+
+    const ex = expandedCluster;
+    const panelId = selectedPanelNoteId;
+    if (ex && panelId && selected.length === 0) {
+      const members = normalizeClusterMembers(ex.data.notes as unknown);
+      if (isNoteInsideNestedCluster(members, panelId)) return;
+      const topMember = members.find((m) => !isNestedClusterMember(m) && m.id === panelId);
+      if (!topMember || isNestedClusterMember(topMember)) return;
+      const top = topMember;
+      pushSnapshot();
+      const nested: ClusterNestedMember = {
+        type: "nestedCluster",
+        id: crypto.randomUUID(),
+        colorKey: top.colorKey ?? DEFAULT_NOTE_COLOR,
+        notes: [{ ...top }],
+      };
+      const newMembers = members.map((m) =>
+        !isNestedClusterMember(m) && m.id === panelId ? nested : m,
+      );
+      updateClusterNodes(ex.id, (n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          notes: newMembers,
+          colorKey: firstLeafNote(newMembers)?.colorKey ?? ex.data.colorKey,
+        },
+      }));
+      setSelectedPanelNoteId(nested.notes[0].id);
+      return;
+    }
+
+    const selectedNotes = selected.filter((n): n is NoteFlowNode => n.type === "noteCard");
+    const allSelectedAreNotes =
+      selected.length >= 2 && selected.every((n) => n.type === "noteCard");
+
+    if (allSelectedAreNotes && selectedNotes.length >= 2) {
+      const idSet = new Set(selectedNotes.map((n) => n.id));
+      const ordered = nds.filter((n): n is NoteFlowNode => n.type === "noteCard" && idSet.has(n.id));
+      const anchor = ordered[0];
+      pushSnapshot();
+      let nextEdges = edgesRef.current;
+      for (const n of ordered.slice(1)) {
+        nextEdges = remapEdgesReplaceNodeId(nextEdges, n.id, anchor.id);
+      }
+      const newCluster: ClusterFlowNode = {
+        id: anchor.id,
+        type: "clusterNode",
+        position: { ...anchor.position },
+        data: {
+          notes: ordered.map((n) => ({
+            id: crypto.randomUUID(),
+            body: n.data.body,
+            colorKey: n.data.colorKey ?? DEFAULT_NOTE_COLOR,
+            formatting: n.data.formatting,
+            width: n.data.width,
+            height: n.data.height,
+          })),
+          colorKey: anchor.data.colorKey ?? DEFAULT_NOTE_COLOR,
+        },
+      };
+      const removeIds = new Set(ordered.slice(1).map((n) => n.id));
+      setNodes((cur) =>
+        cur
+          .filter((n) => !removeIds.has(n.id))
+          .map((n) => (n.id === anchor.id ? newCluster : n)) as BoardNode[],
+      );
+      setEdges(nextEdges);
+      return;
+    }
+
+    if (selected.length !== 1 || selected[0].type !== "noteCard") return;
+    const note = selected[0];
     pushSnapshot();
-    const note = selectedCanvasNote;
-    // Keep the same node id so existing edges stay attached to this graph vertex.
-    const newCluster: ClusterFlowNode = {
+    const newClusterSingle: ClusterFlowNode = {
       id: note.id,
       type: "clusterNode",
       position: { ...note.position },
@@ -625,12 +1202,22 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           body: note.data.body,
           colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
           formatting: note.data.formatting,
+          width: note.data.width,
+          height: note.data.height,
         }],
         colorKey: note.data.colorKey ?? DEFAULT_NOTE_COLOR,
       },
     };
-    setNodes((nds) => nds.map((n) => (n.id === note.id ? newCluster : n)) as BoardNode[]);
-  }, [selectedCanvasNote, pushSnapshot, setNodes]);
+    setNodes((cur) => cur.map((n) => (n.id === note.id ? newClusterSingle : n)) as BoardNode[]);
+  }, [
+    pushSnapshot,
+    setNodes,
+    setEdges,
+    expandedCluster,
+    selectedPanelNoteId,
+    updateClusterNodes,
+    setSelectedPanelNoteId,
+  ]);
 
   // ── Drag-to-pin handlers ──────────────────────────────────────────────────
 
@@ -640,10 +1227,15 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   }, [pushSnapshot]);
 
   const onNodeDrag = useCallback((_: React.MouseEvent, draggedNode: Node) => {
-    if (draggedNode.type !== "noteCard") return;
+    const multi =
+      nodesRef.current.filter(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+      ).length > 1;
+    if (multi) return;
 
-    const w = draggedNode.measured?.width ?? 240;
-    const h = draggedNode.measured?.height ?? 120;
+    if (draggedNode.type !== "noteCard" && draggedNode.type !== "clusterNode") return;
+
+    const { w, h } = boardNodeSize(draggedNode);
     const center: XYPosition = {
       x: draggedNode.position.x + w / 2,
       y: draggedNode.position.y + h / 2,
@@ -653,8 +1245,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     for (const n of nodesRef.current) {
       if (n.id === draggedNode.id) continue;
       if (n.type !== "clusterNode" && n.type !== "noteCard") continue;
-      const nw = n.measured?.width ?? 240;
-      const nh = n.measured?.height ?? (n.type === "clusterNode" ? 160 : 120);
+      const { w: nw, h: nh } = boardNodeSize(n);
       if (
         center.x >= n.position.x &&
         center.x <= n.position.x + nw &&
@@ -688,6 +1279,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   }, [setNodes]);
 
   const onNodeDragStop = useCallback((_: React.MouseEvent, draggedNode: Node) => {
+    const multi =
+      nodesRef.current.filter(
+        (n) => n.selected && (n.type === "noteCard" || n.type === "clusterNode"),
+      ).length > 1;
+
     const targetId = prevDropTargetRef.current;
     prevDropTargetRef.current = null;
 
@@ -702,6 +1298,29 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       );
     }
 
+    if (multi) return;
+
+    if (draggedNode.type === "clusterNode" && targetId) {
+      const targetNode = nodesRef.current.find((n) => n.id === targetId);
+      if (
+        targetNode?.type === "clusterNode" &&
+        targetNode.id !== draggedNode.id
+      ) {
+        // Top of stack is the drag-start snapshot from onNodeDragStart (same source cancel uses).
+        const dragStartSnap = undoStack.current[undoStack.current.length - 1];
+        const prevDragged = dragStartSnap?.nodes.find((n) => n.id === draggedNode.id);
+        nestMergeDragBaselineRef.current =
+          prevDragged != null
+            ? { draggedId: draggedNode.id, position: { ...prevDragged.position } }
+            : null;
+        setNestClusterDialog({
+          draggedClusterId: draggedNode.id,
+          targetClusterId: targetNode.id,
+        });
+        return;
+      }
+    }
+
     if (draggedNode.type !== "noteCard" || !targetId) return;
 
     const noteNode = draggedNode as NoteFlowNode;
@@ -709,18 +1328,31 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (!targetNode) return;
 
     if (targetNode.type === "clusterNode") {
-      const newNote: ClusterNoteItem = {
-        id: crypto.randomUUID(),
-        body: noteNode.data.body,
-        colorKey: noteNode.data.colorKey,
-        formatting: noteNode.data.formatting,
-      };
       setNodes((nds) =>
         nds
           .filter((n) => n.id !== draggedNode.id)
           .map((n) =>
             n.id === targetId && n.type === "clusterNode"
-              ? { ...n, data: { ...n.data, notes: [...(n as ClusterFlowNode).data.notes, newNote] } }
+              ? (() => {
+                  const c = n as ClusterFlowNode;
+                  const members = normalizeClusterMembers(c.data.notes as unknown);
+                  const newNote: ClusterNoteItem = {
+                    id: crypto.randomUUID(),
+                    body: noteNode.data.body,
+                    colorKey: noteNode.data.colorKey,
+                    formatting: noteNode.data.formatting,
+                    width: noteNode.data.width,
+                    height: noteNode.data.height,
+                  };
+                  return {
+                    ...c,
+                    data: {
+                      ...c.data,
+                      notes: [...members, newNote],
+                      colorKey: firstLeafNote([...members, newNote])?.colorKey ?? c.data.colorKey,
+                    },
+                  };
+                })()
               : n,
           ),
       );
@@ -734,8 +1366,22 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         position: { ...target.position },
         data: {
           notes: [
-            { id: crypto.randomUUID(), body: target.data.body, colorKey: target.data.colorKey, formatting: target.data.formatting },
-            { id: crypto.randomUUID(), body: noteNode.data.body, colorKey: noteNode.data.colorKey, formatting: noteNode.data.formatting },
+            {
+              id: crypto.randomUUID(),
+              body: target.data.body,
+              colorKey: target.data.colorKey,
+              formatting: target.data.formatting,
+              width: target.data.width,
+              height: target.data.height,
+            },
+            {
+              id: crypto.randomUUID(),
+              body: noteNode.data.body,
+              colorKey: noteNode.data.colorKey,
+              formatting: noteNode.data.formatting,
+              width: noteNode.data.width,
+              height: noteNode.data.height,
+            },
           ],
           colorKey: target.data.colorKey ?? DEFAULT_NOTE_COLOR,
         },
@@ -754,14 +1400,80 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   // need any shared React state between the panel and the canvas.
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("application/x-corkboard-note")) {
+    const types = e.dataTransfer.types;
+    if (
+      types.includes("application/x-corkboard-note") ||
+      types.includes("application/x-corkboard-new-note") ||
+      types.includes("application/x-corkboard-new-cluster")
+    ) {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect =
+        types.includes("application/x-corkboard-new-note") ||
+        types.includes("application/x-corkboard-new-cluster")
+          ? "copy"
+          : "move";
     }
   }, []);
 
   const handleCanvasDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+
+    const newNoteRaw = e.dataTransfer.getData("application/x-corkboard-new-note");
+    if (newNoteRaw && sfpRef.current) {
+      let payload: { colorKey?: NoteColorKey; formatting?: NoteFormatting };
+      try {
+        payload = JSON.parse(newNoteRaw) as { colorKey?: NoteColorKey; formatting?: NoteFormatting };
+      } catch {
+        return;
+      }
+      pushSnapshot();
+      const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
+      const position: XYPosition = {
+        x: canvasPos.x - DEFAULT_NOTE_WIDTH / 2,
+        y: canvasPos.y - 20,
+      };
+      const newNote: NoteFlowNode = {
+        id: crypto.randomUUID(),
+        type: "noteCard",
+        position,
+        data: {
+          body: "",
+          colorKey: normalizeNoteColorKey(payload.colorKey),
+          formatting: payload.formatting,
+        },
+      };
+      setNodes((nds) => [...nds, newNote]);
+      return;
+    }
+
+    const newClusterRaw = e.dataTransfer.getData("application/x-corkboard-new-cluster");
+    if (newClusterRaw && sfpRef.current) {
+      let payload: { colorKey?: NoteColorKey };
+      try {
+        payload = JSON.parse(newClusterRaw) as { colorKey?: NoteColorKey };
+      } catch {
+        return;
+      }
+      const colorKey = normalizeNoteColorKey(payload.colorKey);
+      pushSnapshot();
+      const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
+      const position: XYPosition = {
+        x: canvasPos.x - DEFAULT_NOTE_WIDTH / 2,
+        y: canvasPos.y - 20,
+      };
+      const newCluster: ClusterFlowNode = {
+        id: crypto.randomUUID(),
+        type: "clusterNode",
+        position,
+        data: {
+          notes: [{ id: crypto.randomUUID(), body: "", colorKey }],
+          colorKey,
+        },
+      };
+      setNodes((nds) => [...nds, newCluster]);
+      return;
+    }
+
     const raw = e.dataTransfer.getData("application/x-corkboard-note");
     if (!raw || !sfpRef.current) return;
     let note: ClusterNoteItem;
@@ -772,11 +1484,11 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     }
 
     // Locate the cluster that owns this note (use fresh ref so we see latest state).
-    const cluster = nodesRef.current.find(
-      (n): n is ClusterFlowNode =>
-        n.type === "clusterNode" &&
-        (n as ClusterFlowNode).data.notes.some((nn) => nn.id === note.id),
-    );
+    const cluster = nodesRef.current.find((n): n is ClusterFlowNode => {
+      if (n.type !== "clusterNode") return false;
+      const members = normalizeClusterMembers((n as ClusterFlowNode).data.notes as unknown);
+      return findLeafNote(members, note.id) !== undefined;
+    });
     if (!cluster) return;
 
     pushSnapshot();
@@ -784,16 +1496,24 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     // Convert the screen drop position to flow canvas coordinates.
     // Offset so the note is centred horizontally and anchored near the cursor.
     const canvasPos = sfpRef.current({ x: e.clientX, y: e.clientY });
-    const position: XYPosition = { x: canvasPos.x - 120, y: canvasPos.y - 20 };
+    const ejectWidth = DEFAULT_NOTE_WIDTH;
+    const position: XYPosition = { x: canvasPos.x - ejectWidth / 2, y: canvasPos.y - 20 };
 
     const newNote: NoteFlowNode = {
       id: crypto.randomUUID(),
       type: "noteCard",
       position,
-      data: { body: note.body, colorKey: note.colorKey, formatting: note.formatting },
+      data: {
+        body: note.body,
+        colorKey: note.colorKey,
+        formatting: note.formatting,
+        width: note.width,
+        height: note.height,
+      },
     };
 
-    const remaining = cluster.data.notes.filter((n) => n.id !== note.id);
+    const members = normalizeClusterMembers(cluster.data.notes as unknown);
+    const remaining = removeLeafNoteFromMembers(members, note.id);
 
     setNodes((nds) => {
       const withoutCluster = nds.filter((n) => n.id !== cluster.id);
@@ -807,7 +1527,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
         data: {
           ...cluster.data,
           notes: remaining,
-          colorKey: remaining[0]?.colorKey ?? DEFAULT_NOTE_COLOR,
+          colorKey: firstLeafNote(remaining)?.colorKey ?? DEFAULT_NOTE_COLOR,
         },
       };
       return [...withoutCluster, updatedCluster, newNote];
@@ -835,30 +1555,160 @@ function BoardCanvas({ boardId }: { boardId: string }) {
     if (!window.confirm("Clear this board? All notes and connections will be removed.")) return;
     setNodes([]);
     setEdges([]);
+    setColorLabels({});
+    setCategoryFilterColor(null);
     undoStack.current = [];
     redoStack.current = [];
     setCanUndo(false);
     setCanRedo(false);
     setResetViewportSignal((s) => s + 1);
     viewportRef.current = DEFAULT_VIEWPORT;
-    saveBoardState(boardId, { nodes: [], edges: [], viewport: DEFAULT_VIEWPORT });
-  }, [boardId, setNodes, setEdges, setCanUndo, setCanRedo]);
+    saveBoardState(boardId, {
+      nodes: [],
+      edges: [],
+      viewport: DEFAULT_VIEWPORT,
+      colorLabels: {},
+    });
+    closeSearch();
+  }, [boardId, setNodes, setEdges, setColorLabels, setCanUndo, setCanRedo, closeSearch]);
+
+  const handleColorLabelUpdate = useCallback(
+    (key: NoteColorKey, label: string | null) => {
+      pushSnapshot();
+      const removing = label === null || label.trim() === "";
+      if (removing) {
+        setCategoryFilterColor((prev) => (prev === key ? null : prev));
+      }
+      setColorLabels((prev) => {
+        const next = { ...prev };
+        if (removing) delete next[key];
+        else next[key] = label.trim();
+        return next;
+      });
+    },
+    [pushSnapshot],
+  );
+
+  const cancelNestClusterDialog = useCallback(() => {
+    if (!nestClusterDialogRef.current) return;
+    nestMergeDragBaselineRef.current = null;
+    setNestClusterDialog(null);
+    undo();
+  }, [undo]);
+
+  const applyNestIntoCluster = useCallback(() => {
+    const d = nestClusterDialogRef.current;
+    if (!d) return;
+    setNestClusterDialog(null);
+    const { draggedClusterId, targetClusterId } = d;
+    const nds = nodesRef.current;
+    const dragged = nds.find((n) => n.id === draggedClusterId);
+    const target = nds.find((n) => n.id === targetClusterId);
+    if (!dragged || !target || dragged.type !== "clusterNode" || target.type !== "clusterNode") {
+      nestMergeDragBaselineRef.current = null;
+      return;
+    }
+    pushNestMergeUndoBaseline(draggedClusterId);
+    const dc = dragged as ClusterFlowNode;
+    const tc = target as ClusterFlowNode;
+    const nested = clusterCanvasToNestedMember(dc.data.notes, dc.data.colorKey);
+    const targetMembers = normalizeClusterMembers(tc.data.notes as unknown);
+    const combined = appendNestedCluster(targetMembers, nested);
+    setNodes((cur) =>
+      cur
+        .filter((n) => n.id !== draggedClusterId)
+        .map((n) =>
+          n.id === targetClusterId && n.type === "clusterNode"
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  notes: combined,
+                  colorKey: firstLeafNote(combined)?.colorKey ?? (n as ClusterFlowNode).data.colorKey,
+                },
+              }
+            : n,
+        ) as BoardNode[],
+    );
+    setEdges((eds) => remapEdgesReplaceNodeId(eds, draggedClusterId, targetClusterId));
+  }, [pushNestMergeUndoBaseline, setNodes, setEdges]);
+
+  const applyFlattenIntoCluster = useCallback(() => {
+    const d = nestClusterDialogRef.current;
+    if (!d) return;
+    setNestClusterDialog(null);
+    const { draggedClusterId, targetClusterId } = d;
+    const nds = nodesRef.current;
+    const dragged = nds.find((n) => n.id === draggedClusterId);
+    const target = nds.find((n) => n.id === targetClusterId);
+    if (!dragged || !target || dragged.type !== "clusterNode" || target.type !== "clusterNode") {
+      nestMergeDragBaselineRef.current = null;
+      return;
+    }
+    pushNestMergeUndoBaseline(draggedClusterId);
+    const dc = dragged as ClusterFlowNode;
+    const tc = target as ClusterFlowNode;
+    const draggedMembers = normalizeClusterMembers(dc.data.notes as unknown);
+    const targetMembers = normalizeClusterMembers(tc.data.notes as unknown);
+    const combined = appendFlattenedClusterMembers(targetMembers, draggedMembers);
+    setNodes((cur) =>
+      cur
+        .filter((n) => n.id !== draggedClusterId)
+        .map((n) =>
+          n.id === targetClusterId && n.type === "clusterNode"
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  notes: combined,
+                  colorKey: firstLeafNote(combined)?.colorKey ?? (n as ClusterFlowNode).data.colorKey,
+                },
+              }
+            : n,
+        ) as BoardNode[],
+    );
+    setEdges((eds) => remapEdgesReplaceNodeId(eds, draggedClusterId, targetClusterId));
+  }, [pushNestMergeUndoBaseline, setNodes, setEdges]);
+
+  useEffect(() => {
+    if (!nestClusterDialog) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelNestClusterDialog();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nestClusterDialog, cancelNestClusterDialog]);
 
   const undoContextValue = useMemo(() => ({ pushSnapshot }), [pushSnapshot]);
 
   return (
     <UndoContext.Provider value={undoContextValue}>
+      <SearchContext.Provider value={searchSessionValue}>
+      <CategoryFilterContext.Provider value={searchOpen ? null : categoryFilterColor}>
       <div
-        className="h-full w-full bg-white dark:bg-neutral-900"
+        className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
         data-connecting={connecting ? "true" : undefined}
         onClick={contextMenu ? closeContextMenu : undefined}
-        onContextMenu={contextMenu ? (e) => { e.preventDefault(); closeContextMenu(); } : undefined}
+        onContextMenu={
+          contextMenu || nestClusterDialog
+            ? (e) => {
+                e.preventDefault();
+                if (contextMenu) closeContextMenu();
+                if (nestClusterDialogRef.current) cancelNestClusterDialog();
+              }
+            : undefined
+        }
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
-        <ReactFlow
-          className="h-full w-full touch-manipulation"
-          colorMode="system"
+        <div className="relative min-h-0 flex-1">
+          <ReactFlow
+            data-corkboard-react-flow=""
+            className="h-full w-full touch-manipulation"
+            colorMode="system"
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -878,23 +1728,36 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           connectionLineType={ConnectionLineType.Straight}
           deleteKeyCode={null}
           defaultEdgeOptions={{ type: "boardEdge" }}
+          multiSelectionKeyCode={["Meta", "Control"]}
+          selectionMode={SelectionMode.Partial}
+          selectionOnDrag={canvasTool === "select"}
+          panOnDrag={canvasTool === "select" ? [1, 2] : true}
+          selectionKeyCode={canvasTool === "select" ? null : "Shift"}
         >
           <Toolbar
+            canvasTool={canvasTool}
+            onCanvasToolChange={setCanvasTool}
             connecting={connecting}
             onToggleConnecting={toggleConnecting}
             onUndo={undo}
             onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
+            searchOpen={searchOpen}
+            onOpenSearch={openSearch}
+            boardTitle={boardTitle}
+            workspaceFile={workspaceFile}
             onClearBoard={handleClearBoard}
             colorKey={toolbarColorKey}
             formatting={toolbarFormatting}
             onChangeColor={handleToolbarColor}
             onChangeFontSize={handleToolbarFontSize}
             onToggleFormat={handleToolbarToggleFormat}
-            canCreateCluster={!!selectedCanvasNote}
+            canCreateCluster={canCreateCluster}
             onCreateCluster={handleToolbarCreateCluster}
-            canDelete={!!(selectedCanvasNote ?? selectedPanelNote)}
+            canResizeToFit={!!(selectedCanvasNodes.length > 0 || selectedPanelNote)}
+            onResizeToFit={handleToolbarResizeToFit}
+            canDelete={!!(selectedCanvasNodes.length > 0 || selectedPanelNote)}
             onDeleteSelected={handleToolbarDelete}
             defaultColorKey={defaultSettings.colorKey}
           />
@@ -902,6 +1765,26 @@ function BoardCanvas({ boardId }: { boardId: string }) {
           <Controls />
           <ViewportResetter signal={resetViewportSignal} />
           <SFPCapture sfpRef={sfpRef} />
+          <BoardUserSelectionPointerFlush />
+          <BoardSearchBar
+            open={searchOpen}
+            inputValue={searchInput}
+            onInputChange={setSearchInput}
+            onClose={closeSearch}
+            matchesLength={searchMatches.length}
+            activeIndex={searchActiveIndex}
+            onNext={goSearchNext}
+            onPrev={goSearchPrev}
+            debouncedQuery={debouncedSearchQuery}
+          />
+          <SearchMatchViewport
+            open={searchOpen}
+            debouncedQuery={debouncedSearchQuery}
+            matches={searchMatches}
+            activeIndex={searchActiveIndex}
+            onClusterInternalActive={onSearchClusterInternalActive}
+            onCollapseClusters={onSearchCollapseClusters}
+          />
         </ReactFlow>
 
         {/* Cluster side panel */}
@@ -963,14 +1846,77 @@ function BoardCanvas({ boardId }: { boardId: string }) {
             </button>
           </div>
         )}
+
+        {nestClusterDialog && (
+          <div
+            className="fixed inset-0 z-[55] flex items-center justify-center bg-black/30 p-4 dark:bg-black/50"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelNestClusterDialog();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="nest-cluster-title"
+              className="max-w-md rounded-xl border border-black/10 bg-white p-5 shadow-xl dark:border-white/10 dark:bg-neutral-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="nest-cluster-title"
+                className="text-base font-semibold text-stone-800 dark:text-stone-100"
+              >
+                Merge clusters?
+              </h2>
+              <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
+                Do you want to merge these notes into a single cluster or add them as a nested cluster?
+              </p>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={cancelNestClusterDialog}
+                  className="rounded-lg border border-black/15 px-3 py-2 text-sm text-stone-700 transition-colors hover:bg-black/5 dark:border-white/15 dark:text-stone-200 dark:hover:bg-white/8"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFlattenIntoCluster}
+                  className="rounded-lg border border-black/15 px-3 py-2 text-sm text-stone-700 transition-colors hover:bg-black/5 dark:border-white/15 dark:text-stone-200 dark:hover:bg-white/8"
+                >
+                  Merge into single cluster
+                </button>
+                <button
+                  type="button"
+                  onClick={applyNestIntoCluster}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                >
+                  Nest
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
+
+        <ColorLegend
+          colorLabels={colorLabels}
+          onUpdateLabel={handleColorLabelUpdate}
+          filterColor={categoryFilterColor}
+          onToggleFilter={toggleCategoryFilter}
+          filterSuspended={searchOpen && categoryFilterColor != null}
+        />
       </div>
+      </CategoryFilterContext.Provider>
+      </SearchContext.Provider>
     </UndoContext.Provider>
   );
 }
 
 // ── Board (outer shell) ───────────────────────────────────────────────────────
 // Manages the list of boards, the active board, and the bottom tab bar.
-// Uses key={activeId} on BoardCanvas so React remounts the canvas cleanly on switch.
+// Uses `${activeId}-${canvasKeyNonce}` on BoardCanvas so React remounts when switching boards
+// or after a workspace JSON import (same tab id, new localStorage payload).
 
 export function Board() {
   const [boards, setBoards] = useState<BoardMeta[]>(() => {
@@ -989,6 +1935,9 @@ export function Board() {
     return boards[0].id;
   });
 
+  const [canvasKeyNonce, setCanvasKeyNonce] = useState(0);
+  const importWorkspaceInputRef = useRef<HTMLInputElement>(null);
+
   const persistBoards = useCallback((next: BoardMeta[]) => {
     setBoards(next);
     saveBoardsMeta(next);
@@ -1000,7 +1949,7 @@ export function Board() {
   }, []);
 
   const handleAdd = useCallback(() => {
-    if (boards.length >= 8) return;
+    if (boards.length >= WORKSPACE_MAX_BOARDS) return;
     // Pick the lowest unused "Board N" number.
     const used = new Set(
       boards.map((b) => { const m = b.title.match(/^Board (\d+)$/); return m ? +m[1] : 0; }),
@@ -1035,10 +1984,100 @@ export function Board() {
     persistBoards(next);
   }, [persistBoards]);
 
+  const tryImportWorkspaceJsonText = useCallback((text: string) => {
+    if (
+      !window.confirm(
+        "Replace the entire workspace? All current boards and notes will be removed and replaced by this file. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    const parsed = parseWorkspaceImportJson(text);
+    if (!parsed.ok) {
+      window.alert(parsed.error);
+      return;
+    }
+    try {
+      const r = applyWorkspaceImport(parsed.doc);
+      setBoards(r.boards);
+      setActiveId(r.activeId);
+      setCanvasKeyNonce((n) => n + 1);
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not apply this workspace file.");
+    }
+  }, []);
+
+  const handleExportWorkspaceJson = useCallback(() => {
+    try {
+      downloadWorkspaceJson();
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not export the workspace.");
+    }
+  }, []);
+
+  const workspaceFile = useMemo<WorkspaceFileMenuActions>(
+    () => ({
+      onExportWorkspaceJson: handleExportWorkspaceJson,
+      onRequestImportWorkspaceJson: () => importWorkspaceInputRef.current?.click(),
+    }),
+    [handleExportWorkspaceJson],
+  );
+
+  const handleImportWorkspaceInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const text = await file.text();
+      tryImportWorkspaceJsonText(text);
+    },
+    [tryImportWorkspaceJsonText],
+  );
+
+  const handleWorkspaceDragOverCapture = useCallback((e: React.DragEvent) => {
+    if ([...e.dataTransfer.types].includes("Files")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+
+  const handleWorkspaceDropCapture = useCallback(
+    async (e: React.DragEvent) => {
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !file.name.toLowerCase().endsWith(".json")) return;
+      if ([...e.dataTransfer.types].includes("application/x-corkboard-note")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const text = await file.text();
+      tryImportWorkspaceJsonText(text);
+    },
+    [tryImportWorkspaceJsonText],
+  );
+
   return (
-    <div className="flex h-dvh w-full flex-col">
+    <div
+      className="flex h-dvh w-full flex-col"
+      onDragOverCapture={handleWorkspaceDragOverCapture}
+      onDropCapture={handleWorkspaceDropCapture}
+    >
+      <input
+        ref={importWorkspaceInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="sr-only"
+        aria-hidden
+        tabIndex={-1}
+        onChange={handleImportWorkspaceInputChange}
+      />
       <div className="min-h-0 flex-1">
-        <BoardCanvas key={activeId} boardId={activeId} />
+        <BoardCanvas
+          key={`${activeId}-${canvasKeyNonce}`}
+          boardId={activeId}
+          boardTitle={boards.find((b) => b.id === activeId)?.title ?? "Board"}
+          workspaceFile={workspaceFile}
+        />
       </div>
       <BoardTabs
         boards={boards}

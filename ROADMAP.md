@@ -25,58 +25,50 @@ Local-first corkboard: infinite canvas, standalone notes and clusters, optional 
 
 ---
 
-## v2 — in progress
+## v2 — shipped
 
-**Theme:** More useful and polished **without a backend** — still local / client-only unless a feature explicitly adds something like optional export-only flows.
+**Live:** [bigcorkboard.com](https://bigcorkboard.com) (same deployment as v1; existing users upgrade in place via browser storage)
 
-### Scope
+**Theme:** More useful and polished **without a backend** — categories, search, export, nested clusters, resize, and canvas polish. Workspace JSON export/import for manual project switching until v3 desktop save files.
 
-| Area | Intent |
-|------|--------|
-| **Categories** | Per-board color labels + legend UI; optional “filter by this color” on the canvas. |
-| **Palette** | Second note color set (e.g. neon) tuned for dark canvas; user or per-board choice TBD. |
-| **Search** | `Cmd/Ctrl+F` (or equivalent) on the **active board** only; highlight matches; no cross-board search in v2. |
-| **Export** | PNG (current view + fit-all) and JSON backup/import for the current board. |
-| **Nested clusters** | **One level only:** cluster-on-cluster on canvas (dialog: flatten vs nest vs cancel); panel shows children as **indented** rows; optional panel tree-DnD later. Deeper hierarchy → **nested corkboards (v3)**. |
-| **Polish** | Small UX wins that don’t warrant their own row — track as individual GitHub issues. |
+### Completed milestones (checklist)
 
-### Work items (living checklist)
+- [x] Color legend + filter by color  
+- [x] Eight-color theme-aware palette (legacy six-color keys migrate on load)  
+- [x] Board search (`Cmd/Ctrl+F`) with cluster panel integration  
+- [x] Export PNG (viewport + fit all)  
+- [x] Export / import workspace JSON  
+- [x] Multi-select + bulk toolbar actions  
+- [x] Nested clusters (max depth 1)  
+- [x] Note + cluster resize, **Fit**, drag-to-place new note/cluster  
+- [x] Cluster front-card formatting + double-click inline edit  
 
-Use this list for planning issues/PRs; reorder as priorities shift.
+### Open questions (defer — revisit before big UI changes)
 
-- [ ] **Color legend** — Bottom strip (above board tabs): swatch + label per color that has a name; “assign category” for unused colors; click chip to rename/clear. Data field `colorLabels` on board already exists in the model spec.  
-- [ ] **Filter by color** — From legend: dim non-matching notes/clusters; clear on `Escape` or second click.  
-- [ ] **Neon / vivid palette** — Second color set for notes; works with dark canvas; decision: global vs per-board toggle.  
-- [ ] **Search** — Overlay from toolbar; full-text on canvas + cluster-internal notes; highlight matches; no auto-pan.  
-- [ ] **Export PNG** — `html-to-image` (or similar): “current viewport” and “fit all nodes then capture”; filename from board title.  
-- [ ] **Export / import JSON** — Download board state; file pick or drop to restore (define conflict behavior: replace board vs merge TBD).  
-- [ ] **Multi-select & bulk actions** — Not polish: new interaction model + toolbar/cluster behavior. Tie to your GitHub issues as you open/close them.  
-  - **Selection:** additive select with **Ctrl/Cmd+click**; optional **marquee / drag-rectangle** (likely gated behind a **Select** mode or modifier so it doesn’t fight pan/drag on the canvas).  
-  - **Bulk color & formatting:** apply to every selected **note** (and define rules for **clusters** — e.g. front-card color only vs whole cluster).  
-  - **Bulk move:** drag the selection so all selected nodes move together (single undo step).  
-  - **Bulk cluster:** combine selected canvas items into **one** cluster (semantics when selection includes clusters — align with nested-cluster rules in [SPEC.md](./SPEC.md)).  
-- [ ] **Nested clusters (max depth 1)** — Data model + canvas drop (cluster → cluster) + dialog (**Flatten** | **Nest** | **Cancel**); panel **indented** tree UI; enforce **no cluster inside a child cluster**. Optional: panel DnD as folder tree. Spec: [SPEC.md](./SPEC.md) *Nested clusters*.  
+- [ ] **Cluster panel vs canvas note sizing** — Inner notes persist per-note `width` / `height`; the collapsed cluster on canvas uses the **top** note’s dimensions, but panel rows use a separate full-width list layout (`resize-y` textarea, not stored size). Correct data model, but the mismatch can confuse at first. Options for a future pass: panel cards at stored size, resize in panel, or an intentional “list editor vs canvas preview” split with clearer affordances. Needs product discussion before a larger cluster-panel redesign.
+- [ ] **Default note sizing mode** — v2 uses **fixed** default cards + scroll + manual resize + **Fit**. Future **app preference**: auto-grow height while typing (min = default) vs fixed boxes. Needs per-note **fixed** override after manual resize; global toggle sets default for new notes only (or optional bulk apply). See [SPEC.md — Default note sizing mode (open)](./SPEC.md#default-note-sizing-mode-open).
 
-### Polish & small UX (v2 backlog)
-
-Smaller wins; link GitHub issues inline when you have them (e.g. `(#123)`).
-
-- [ ] **Note resize** — Drag handle(s) on canvas notes to set **width/height** independent of body length (sensible min/max, persist on `noteCard`, edges/handles stay coherent). [#25](https://github.com/dixiuseb/big-corkboard/issues/25)
-- [ ] **Drag-to-place new note** — Click-drag from **Add note** to spawn a card at drop position (ghost while dragging, cancel if released off-canvas). Moderate interaction work but still **client-only**; low priority vs larger v2 items — **not** inherently a v3 feature unless you batch it with unrelated work. [#26](https://github.com/dixiuseb/big-corkboard/issues/26)
-
-Planned v2 **search / export / categories / palette** detail: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions or inline here if you want a single index.
+Historical v2 scope table and polish issue links: [SPEC.md](./SPEC.md). Link GitHub issue numbers in PR descriptions if you want a single index.
 
 ---
 
 ## v3 — planned
 
-Backend + heavier client features: **image nodes** (IndexedDB locally, Supabase Storage when synced), **cloud sync** (Supabase auth, last-write-wins per board for solo v3), **user-defined colors/themes**, **Capacitor** mobile shell + touch polish, and **nested corkboards** (sub-board–level hierarchy — distinct from **v2 one-level nested clusters**, see [SPEC.md](./SPEC.md)). See [SPEC.md](./SPEC.md) sections *Image nodes*, *Cloud sync*, *Mobile*.
+**Primary deliverable:** **Desktop app** (workspace = save file on disk) — **Tauri**-wrapped Next/React, with **New / Open / Save / Save as**, **recent files**, and **debounced auto-save** to the filesystem. The **v2 JSON document** is the on-disk format (e.g. `.corkboard`); no second schema.
+
+**Web build (bigcorkboard.com):** stays **`localStorage`** + current UX; honest copy about browser-stored data; **JSON export/import** as backup and portability; **no cloud sync** in v3.
+
+**Also in v3 (feature track, not blocked on sync):** **image nodes** (IndexedDB on web; consistent with workspace file on desktop), **user-defined colors/themes**, and **nested corkboards** (sub-board scope — distinct from [v2 nested clusters](./SPEC.md)). See [SPEC.md](./SPEC.md) *Image nodes*, *Desktop application and save files*, *Nested corkboards*.
+
+**Explicitly not v3:** optional **personal** cloud sync (moved to v4+). **Phone** is not a target; **tablet** remains post–desktop (see [SPEC.md — Mobile](./SPEC.md#mobile)).
 
 ---
 
-## v4 — planned
+## v4+ — planned
 
-Collaboration: shareable read-only links, real-time co-editing, full-text search across all boards.
+**Optional personal cloud sync** (e.g. **Supabase**): opt-in, **last-write-wins per workspace**, solo-focused; app remains fully usable offline without an account. **Collaboration** (shareable workspaces, real-time co-editing) is a **separate** track — not bundled with first sync.
+
+Other long-hanging fruit (examples): shareable read-only links, **cross-board / cross-workspace search** if product still wants it.
 
 ---
 
@@ -85,7 +77,7 @@ Collaboration: shareable read-only links, real-time co-editing, full-text search
 | Doc | Purpose |
 |-----|---------|
 | **README.md** | Short pitch, live link, **how to use** the app, where data lives, minimal contributor pointers. |
-| **SPEC.md** | Goals, mental model, data model, tech stack, design decisions, future (v2–v4) intent, dev setup. |
+| **SPEC.md** | Goals, mental model, data model, tech stack, design decisions, future (v2–v4+) intent, dev setup. |
 | **ROADMAP.md** (this file) | What shipped, what’s next, checklists by version. |
 
 When a version ships, update the intro in **README** if user-facing behavior changes, sync **SPEC** / **ROADMAP** milestones, and tick items here.
