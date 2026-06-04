@@ -109,6 +109,12 @@ function AboutMenu() {
             GitHub
           </a>
         </p>
+        <p className="mt-3 leading-relaxed text-stone-600 dark:text-neutral-300">
+          Have an issue or a suggestion? Email me at{" "}
+          <a href="mailto:support@bigcorkboard.com" className={linkClass}>
+            support@bigcorkboard.com
+          </a>
+        </p>
       </div>,
       document.body,
     );
