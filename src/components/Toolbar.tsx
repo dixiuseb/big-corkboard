@@ -274,7 +274,7 @@ function FileMenu({
           }}
           className="flex w-full px-3 py-2 text-left text-stone-700 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-white/8"
         >
-          Export workspace as JSON…
+          Export workspace…
         </button>
         <button
           type="button"
@@ -301,7 +301,7 @@ function FileMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         disabled={exportingPng}
-        title="File — export PNG, backup workspace JSON, import workspace"
+        title="File — export PNG, backup workspace (.corkboard), import workspace"
         className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-black/15 px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-black/30 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60 dark:border-white/15 dark:text-neutral-400 dark:hover:border-white/30 dark:hover:text-white"
       >
         File

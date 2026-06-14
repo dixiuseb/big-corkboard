@@ -2046,7 +2046,7 @@ export function Board() {
   const handleWorkspaceDropCapture = useCallback(
     async (e: React.DragEvent) => {
       const file = e.dataTransfer.files?.[0];
-      if (!file || !file.name.toLowerCase().endsWith(".json")) return;
+      if (!file || !/\.(corkboard|json)$/i.test(file.name)) return;
       if ([...e.dataTransfer.types].includes("application/x-corkboard-note")) return;
       e.preventDefault();
       e.stopPropagation();
@@ -2065,7 +2065,7 @@ export function Board() {
       <input
         ref={importWorkspaceInputRef}
         type="file"
-        accept="application/json,.json"
+        accept=".corkboard,application/json,.json"
         className="sr-only"
         aria-hidden
         tabIndex={-1}

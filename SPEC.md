@@ -8,8 +8,8 @@ This document is the **technical and product design spec** for contributors, age
 
 - **Capture ideas where they land.** Notes and clusters coexist anywhere on the board; nothing forces a folder tree mindset.
 - **Feel like a real corkboard.** Stacked cards, color at a glance, optional connections that stay unobtrusive until you need them.
-- **Ship in focused versions** — v1 leaned on React Flow for pan/zoom/drag/connect and prioritized note UX, clusters, and local persistence; v2 adds search, export, and category polish without a backend ([roadmap](./ROADMAP.md)).
-- **Desktop-first from v3 onward** — the primary product is a local save-file workspace on disk (packaged with **Tauri**); the public web build stays useful as a demo and fallback with browser storage and JSON portability. Optional **personal** cloud sync is explicitly **v4+**, not a gate for desktop shipping.
+- **Ship in focused versions** — v1 leaned on React Flow for pan/zoom/drag/connect and prioritized note UX, clusters, and local persistence; **v2** added search, export, categories, nested clusters, and resize without a backend ([roadmap](./ROADMAP.md)). **v2 is feature-complete** for the original corkboard concept.
+- **Desktop-first from v3 onward** — v3 ships **only** the desktop save-file app (**Tauri**); the public web build stays a demo and fallback with browser storage and `.corkboard` portability. New canvas features and UI expansions are **v4+**, not v3. Optional **personal** cloud sync is also **v4+**.
 
 ## Mental model
 
@@ -19,44 +19,59 @@ One infinite canvas: **standalone notecards** and **expandable cluster-nodes** c
 
 The **board tabs** in the UI (up to eight per session) are all part of a single **workspace** — one project or creative context (e.g. one novel, one screenplay). That boundary is intentional.
 
-Switching between **unrelated** projects is **not** “another tab”: it is a **workspace** change. v2 **JSON export/import** carries the whole workspace so users can move projects manually; v3 **save files** map one workspace ↔ one file on disk. Preserve this distinction in persistence, export, and any future sync UX.
+Switching between **unrelated** projects is **not** “another tab”: it is a **workspace** change. v2 **export/import** (`.corkboard`) carries the whole workspace so users can move projects manually; v3 **desktop save files** use the same format — one workspace ↔ one file on disk. Preserve this distinction in persistence, export, and any future sync UX.
 
 State is persisted **locally first**; the on-disk / export JSON shape is versioned so optional cross-device sync (v4+) can layer on without rewriting the core model.
 
 ## Data model
 
+Persisted canvas nodes use React Flow types **`noteCard`** and **`clusterNode`**. Cluster internals use **`ClusterMember[]`** (`ClusterNoteItem` | nested **`ClusterNestedMember`**) — see `src/lib/clusterMembers.ts`.
+
 ```ts
-type Color = 'iris' | 'sky' | 'spearmint' | 'fern' | 'marigold' | 'terracotta' | 'rose' | 'stone'
+type NoteColorKey = 'iris' | 'sky' | 'spearmint' | 'fern' | 'marigold' | 'terracotta' | 'rose' | 'stone'
 
 // Formatting applies to the entire note body — no inline / rich-text ranges.
-// This keeps the data model simple and avoids a contenteditable editor.
-type FontSize = 'sm' | 'md' | 'lg' | 'xl'  // defaults to 'md'
+type NoteFontSize = 'sm' | 'md' | 'lg' | 'xl'  // defaults to 'md'
 
-type Formatting = {
+type NoteFormatting = {
   bold?: boolean
   italic?: boolean
   underline?: boolean
-  fontSize?: FontSize
+  fontSize?: NoteFontSize
 }
 
-type NoteCard = {
+type ClusterNoteItem = {
   id: string
-  type: 'card'
   body: string
-  color: Color
-  formatting?: Formatting
-  width?: number   // optional; canvas note body width (px)
-  height?: number  // optional; canvas note body height (px)
-  position: { x: number; y: number }
+  colorKey?: NoteColorKey
+  formatting?: NoteFormatting
+  width?: number   // optional; note body width (px)
+  height?: number  // optional; note body height (px)
 }
 
-// No separate title field — the first note in the cluster acts as the title card.
-type ClusterNode = {
+type ClusterNestedMember = {
+  type: 'nestedCluster'
   id: string
-  type: 'cluster'
-  color: Color
-  position: { x: number; y: number }
-  notes: NoteCard[]  // notes live inside the cluster, not on the canvas
+  colorKey?: NoteColorKey
+  notes: ClusterNoteItem[]   // flat notes only — no deeper nesting
+}
+
+type ClusterMember = ClusterNoteItem | ClusterNestedMember
+
+// Canvas note (React Flow node type: 'noteCard')
+type NoteNodeData = {
+  body: string
+  colorKey?: NoteColorKey
+  formatting?: NoteFormatting
+  width?: number
+  height?: number
+}
+
+// No separate title field — the first note in member order acts as the title card.
+// Canvas cluster (React Flow node type: 'clusterNode')
+type ClusterNodeData = {
+  colorKey?: NoteColorKey
+  members: ClusterMember[]   // notes live inside the cluster, not on the canvas
 }
 
 // Renamed from Connection to avoid collision with React Flow's Connection type.
@@ -71,12 +86,11 @@ type BoardEdge = {
 type Board = {
   id: string
   title: string
-  nodes: (NoteCard | ClusterNode)[]
+  nodes: object[]   // React Flow node JSON (noteCard | clusterNode)
   edges: BoardEdge[]
   viewport: { x: number; y: number; zoom: number }
   // User-defined label per color (e.g. iris → "Characters", sky → "Scenes").
-  // Omitted colors have no label. UI reads this to render the bottom legend.
-  colorLabels?: Partial<Record<Color, string>>
+  colorLabels?: Partial<Record<NoteColorKey, string>>
 }
 ```
 
@@ -85,7 +99,7 @@ Board canvas state and the boards list are **persisted separately** in `localSto
 - `corkboard:boards` — ordered array of `{ id, title }` (the tab list)
 - `corkboard:board:{id}` — full canvas state for each board
 
-This way the tab list can be loaded instantly without deserializing every board’s nodes. **Workspace JSON export** must still read **every** `corkboard:board:{id}` (plus `corkboard:boards`) into one file — see [Export (v2) — JSON](#export-v2).
+This way the tab list can be loaded instantly without deserializing every board’s nodes. **Workspace export** must still read **every** `corkboard:board:{id}` (plus `corkboard:boards`) into one file — see [Workspace save file format](#workspace-save-file-format).
 
 ## Tech stack
 
@@ -125,7 +139,7 @@ This way the tab list can be loaded instantly without deserializing every board�
   - Scrollable list of notes as editable cards.
   - Selecting a note in the panel highlights it; formatting for that note uses the **top toolbar** (same controls as canvas notes).
   - Cluster-level actions live in the **panel** (delete cluster, un-cluster, add note, etc.).
-  - **Panel vs canvas size (open):** inner notes **store** `width` / `height`, but panel rows do **not** render at those dimensions today — only the collapsed canvas cluster does (for whichever note is currently on top). Reordering can change canvas size while panel cards stay full-width; behavior is intentional for v2 but worth revisiting before a cluster-panel layout pass. See [ROADMAP.md — Open questions](./ROADMAP.md#open-questions-defer--revisit-before-big-ui-changes).
+  - **Panel vs canvas size (open, v4+):** inner notes **store** `width` / `height`, but panel rows do **not** render at those dimensions today — only the collapsed canvas cluster does (for whichever note is currently on top). Reordering can change canvas size while panel cards stay full-width; behavior is intentional for v2 but worth revisiting in a v4+ cluster-panel pass. See [ROADMAP.md — Open questions (v4+)](./ROADMAP.md#open-questions-defer-to-v4).
 - **Cluster-level actions**:
   - **Delete cluster** — removes the cluster and all contained notes.
   - **Un-cluster** — removes the cluster and places notes back on the canvas near the old position, spread slightly.
@@ -141,13 +155,13 @@ This way the tab list can be loaded instantly without deserializing every board�
 
 #### Default note sizing mode (open)
 
-v2 defaults to **fixed** cards: implicit default size, scroll when content overflows, manual resize or **Fit** to change dimensions. Some users prefer **auto-grow** (height follows content as they type, min = default). Deferred to **app preferences (v3+)**:
+v2 defaults to **fixed** cards: implicit default size, scroll when content overflows, manual resize or **Fit** to change dimensions. Some users prefer **auto-grow** (height follows content as they type, min = default). Deferred to **app preferences (v4+)**:
 
 - Global default for **new** notes: fixed vs auto-grow.
 - Per-note override after **manual resize** (fixed until changed again).
 - Optional bulk “apply mode to board” is a separate product decision.
 
-See [ROADMAP.md — Open questions](./ROADMAP.md#open-questions-defer--revisit-before-big-ui-changes).
+See [ROADMAP.md — Open questions (v4+)](./ROADMAP.md#open-questions-defer-to-v4).
 
 #### Light and dark mode
 
@@ -161,9 +175,9 @@ See [ROADMAP.md — Open questions](./ROADMAP.md#open-questions-defer--revisit-b
 
 **Legacy boards:** persisted `colorKey` / `colorLabels` from the old six-color set (`amber`, `teal`, `violet`, `lime`, …) are remapped on load (see `normalizeNoteColorKey` in `noteColors.ts`).
 
-**Future palette expansions**
+**Future palette expansions (v4+)**
 
-- **v3**: **user-defined colors and themes** — custom hex per note, custom board backgrounds, full palette control.
+- **User-defined colors and themes** — custom hex per note, custom board backgrounds, full palette control. Not in v3 scope.
 
 #### Color labels / legend (v2)
 
@@ -209,7 +223,7 @@ Each color can have a **user-defined label per board** (persisted as `colorLabel
 - **First load** with no data: create **“Board 1”**.
 - **Clear board** (toolbar): confirm, then wipe nodes, edges, and viewport for the **current** tab only — not the tab itself.
 
-**Web build (through v3+):** continues to use `localStorage` as today. Copy in the product should frame this honestly (e.g. data lives in the browser; export regularly for backup).
+**Web build (through v3+):** continues to use `localStorage` as today. Copy in the product should frame this honestly (e.g. data lives in the browser; export a `.corkboard` regularly for backup).
 
 **Desktop (v3+):** same debounce idea, writing to a **workspace save file** (see [Desktop application and save files (v3)](#desktop-application-and-save-files-v3)).
 
@@ -223,18 +237,18 @@ Together, the open tabs are one **workspace** (see [Workspaces vs boards](#works
 - **Delete tab**: confirm; if that would leave zero boards, create a fresh **“Board 1”**.
 - **Clear board** is a toolbar action on the **active** board, not on the tab row.
 
-### Nested clusters (planned) vs nested corkboards (v3+)
+### Nested clusters (v2)
 
-**v1:** Clusters hold a flat list of notes only — no clusters inside clusters.
+**v1:** Clusters held a flat list of notes only.
 
-**Planned (target v2 unless reprioritized): one level of cluster nesting**
+**v2 (shipped): one level of cluster nesting**
 
-- **Depth rule:** At most **one** level. A **root** cluster may contain **notes** and **child clusters**; a **child cluster must not** contain another cluster (only notes). Deeper trees belong under **nested corkboards / sub-boards (v3+)**, not arbitrary cluster recursion.
-- **Canvas — cluster onto cluster:** The **target** cluster is always the **parent** that stays on the canvas. On drop, show a **dialog**: **Flatten** (append every note from the dragged cluster to the **end** of the target as loose notes inside the target, then remove the dragged cluster node) **| Nest** (keep the dragged item as a **single child cluster** inside the target) **| Cancel** (abort; single **undo** step restores prior state). Edge rewiring and empty-cluster rules TBD in implementation.
-- **Panel:** Child clusters appear as an **indented sub-list** (folder-style hierarchy in the UI). Optional later: **in-panel DnD** like a file tree — e.g. dropping directly **under** a nested-cluster row assigns into that child cluster; **reject** drops that would exceed one level.
-- **“Make cluster”** in the panel: enable for a selected note only when the result is a **valid** child cluster (respect depth cap — e.g. not for a note that already sits inside a child cluster).
+- **Depth rule:** At most **one** level. A **root** cluster may contain **notes** and **child clusters** (`nestedCluster` members); a **child cluster must not** contain another cluster (only notes). Deeper hierarchy belongs under **nested corkboards (v4+)**, not arbitrary cluster recursion.
+- **Canvas — cluster onto cluster:** Drag a cluster onto another cluster. A **dialog** offers **Flatten** (append every note from the dragged cluster to the **end** of the target as loose notes, then remove the dragged cluster node), **Nest** (keep the dragged item as a **single child cluster** inside the target), or **Cancel** (abort; undo restores prior state).
+- **Panel:** Child clusters appear as an **indented sub-list**. Panel drag-and-drop can move notes into nested clusters when depth rules allow.
+- **“Make cluster”** in the panel: wraps a selected top-level note into a nested cluster when depth rules allow (not for notes already inside a child cluster).
 
-**Nested corkboards (v3+):** A cluster or board region acts as a **sub-board** — different scope and data model than “one extra level of cluster.” See [ROADMAP.md](./ROADMAP.md) v3.
+**Nested corkboards (v4+):** A cluster or board region acts as a **sub-board** — different scope and data model than one extra level of cluster nesting. See [ROADMAP.md](./ROADMAP.md) v4+.
 
 ### Search (v2)
 
@@ -302,32 +316,37 @@ Together, the open tabs are one **workspace** (see [Workspaces vs boards](#works
 - Contents: text input, match counter (**“2 / 4 matches”** or **“No matches”**), prev/next controls, ✕ close.
 - **Non-modal** — user can still pan and interact with the canvas while search is open.
 
-### Export (v2)
+### Workspace save file format
 
-Local-only; **no backend**.
+Local-only; **no backend**. Used for **web export/import** (v2+) and **desktop save files** (v3+).
 
-#### PNG
+#### File extension
+
+- **`.corkboard`** — canonical extension (UTF-8 JSON inside). Desktop **Open / Save** dialogs and the web **File** menu use this extension.
+- **Legacy:** Early v2 web backups may use **`.json`** with **`version: 1`**. Import accepts **`version` 1 or 2** when the document shape matches; new exports use **`version: 2`**. No separate migration tooling is required for the pre-release user base.
+
+#### PNG (v2)
 
 - Rasterize the canvas (`html-to-image` or equivalent).
 - Two modes: **current view** (viewport as-is) and **fit all** (zoom to fit every node, then capture). **Fit all** is the primary shareable “whole board” artifact.
 - Default filename: **board title + timestamp** (per mode as needed).
 
-#### JSON export / import
+#### Document envelope
 
 - **Scope:** the **entire current workspace** — all boards in the tab list, not only the active board — so the file is a complete project snapshot.
-- **Web / localStorage:** Board list and per-board bodies are stored **separately** (`corkboard:boards` vs `corkboard:board:{id}`) so the UI can load the tab strip without deserializing every board ([Data model](#data-model)). The JSON exporter **must** deliberately **assemble** the snapshot from **all** of those keys (ordered tab list + each board’s full payload), not from the active board’s in-memory React Flow state alone. Skipping this would silently drop boards the user is not currently viewing.
-- **Schema (versioned from day one):** `{ version, exportedAt, boards: BoardState[] }` where each entry is the full persisted state for one board (nodes, edges, viewport, `colorLabels`, titles / ids as in app storage). Forward-compatible import depends on bumping `version` when the shape changes.
-- **Import:** file picker or drop onto the app.
-- **Conflict behavior (v2):** **replace workspace** — no merge. Warn clearly before overwrite. This is the intentional primitive for **manual project switching**: export → fresh session → import.
+- **Web / localStorage:** Board list and per-board bodies are stored **separately** (`corkboard:boards` vs `corkboard:board:{id}`) so the UI can load the tab strip without deserializing every board ([Data model](#data-model)). The exporter **must** deliberately **assemble** the snapshot from **all** of those keys (ordered tab list + each board’s full payload), not from the active board’s in-memory React Flow state alone.
+- **Schema:** `{ version, exportedAt, boards: BoardState[] }` where **`version` is `2`** for current exports and each board entry is the full persisted state (nodes, edges, viewport, `colorLabels`, id, title). Bump `version` when the envelope or board shape changes incompatibly.
+- **Import:** file picker or drop onto the app (`.corkboard` or legacy `.json`).
+- **Conflict behavior:** **replace workspace** — no merge. Warn clearly before overwrite. This is the intentional primitive for **manual project switching**: export → fresh session → import.
 
-#### Out of scope for v2
+#### Out of scope
 
 - No PDF.
 - No shareable link (that implies hosted infrastructure; see v4+ if ever added).
 
 ### Desktop application and save files (v3)
 
-Big Corkboard’s **primary target platform from v3 onward** is a **desktop application**. The web build at **bigcorkboard.com** remains a **demo**, acquisition surface, and **fallback** — not the main experience.
+Big Corkboard’s **primary target platform from v3 onward** is a **desktop application**. v3 scope is **desktop packaging only** — the same corkboard feature set as v2, persisted to disk. The web build at **bigcorkboard.com** remains a **demo**, acquisition surface, and **fallback** — not the main experience.
 
 #### Rationale
 
@@ -344,15 +363,15 @@ Big Corkboard’s **primary target platform from v3 onward** is a **desktop appl
 
 #### Save file model
 
-- One **workspace** ↔ one save file (e.g. `.corkboard`, JSON inside).
+- One **workspace** ↔ one **`.corkboard`** file (UTF-8 JSON inside, **`version: 2`** envelope — see [Workspace save file format](#workspace-save-file-format)).
 - Shell actions: **New workspace**, **Open** (file picker), **Save**, **Save as**, plus a **recent workspaces** list on launch.
 - **Auto-save** on change (debounced), same spirit as today’s `localStorage` debounce — target is the filesystem instead.
-- The **v2 JSON export document** *is* the save-file format — **no separate ad-hoc schema** for disk.
+- **No separate ad-hoc schema** for disk — the v2 export document *is* the save-file format.
 
 #### Web build (v3+)
 
 - Still **`localStorage`** + the same in-app UX as today.
-- **JSON export/import** remains the portability and backup escape hatch.
+- **`.corkboard` export/import** remains the portability and backup escape hatch.
 - **No cloud sync** on the web build in v3; messaging should encourage regular export for backup.
 
 ### Optional personal cloud sync (v4+)
@@ -378,14 +397,14 @@ Sync is **explicitly deferred** past the v3 desktop release. When built, it is *
 - **Tablet (e.g. iPad):** desirable long-term; **Capacitor** (or similar) is a likely path, **after** v3 desktop ships.
 - **Product constraint:** no mobile-specific architecture requirements should compromise the v3 desktop save-file design.
 
-### Image nodes (v3)
+### Image nodes (v4+)
 
-Images are **first-class canvas objects** — an `imageNode` type with the same drag/connect/pin behavior as notes where applicable.
+Images are **first-class canvas objects** — an `imageNode` type with the same drag/connect/pin behavior as notes where applicable. **Not in v3 scope.**
 
 - **Adding**: file drop on canvas or paste when canvas is focused and no note is editing.
-- **Resizing**: horizontal resize control (same idea as notes).
+- **Resizing**: width and height resize (same idea as notes).
 - **Selection UI**: color/tint, caption, delete — no rich body text.
-- **Storage**: blobs don’t live in `localStorage`; **IndexedDB** in the web build; in the **v3 desktop** app, bundle or reference blobs in a way consistent with the workspace save file; **Supabase Storage** (or equivalent) only if **v4+** optional sync is enabled.
+- **Storage**: blobs don’t live in `localStorage`; **IndexedDB** in the web build; on **desktop**, bundle or reference blobs in a way consistent with the `.corkboard` save file; **Supabase Storage** (or equivalent) only if **v4+** optional sync is enabled.
 
 Data sketch:
 

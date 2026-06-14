@@ -1,5 +1,5 @@
-// Workspace-level JSON export/import (all boards). Matches SPEC envelope:
-// { version, exportedAt, boards[] }.
+// Workspace-level export/import (all boards). Matches SPEC envelope:
+// { version, exportedAt, boards[] } — saved as `.corkboard` (UTF-8 JSON).
 
 import {
   loadBoardsMeta,
@@ -16,7 +16,10 @@ import {
 /** Must stay aligned with the tab bar limit in `BoardTabs`. */
 export const WORKSPACE_MAX_BOARDS = 8;
 
-export const WORKSPACE_JSON_VERSION = 1;
+export const WORKSPACE_JSON_VERSION = 2;
+
+/** Import accepts these envelope versions (same board shape; v1 = early v2 `.json` backups). */
+export const WORKSPACE_JSON_IMPORT_VERSIONS = [1, 2] as const;
 
 /** One tab + full persisted canvas payload (same shape written to `corkboard:board:{id}`). */
 export type WorkspaceBoardSnapshot = BoardMeta & PersistedBoardState;
@@ -47,9 +50,9 @@ export function gatherWorkspaceExport(): WorkspaceExportDocument {
   };
 }
 
-export function workspaceJsonFilename(): string {
+export function workspaceSaveFilename(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `corkboard-workspace ${stamp}.json`;
+  return `corkboard-workspace ${stamp}.corkboard`;
 }
 
 export function downloadWorkspaceJson(): void {
@@ -58,7 +61,7 @@ export function downloadWorkspaceJson(): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = workspaceJsonFilename();
+  a.download = workspaceSaveFilename();
   a.rel = "noopener";
   a.click();
   URL.revokeObjectURL(url);
@@ -92,10 +95,10 @@ export function parseWorkspaceImportJson(
   if (!Number.isInteger(version) || version < 1) {
     return { ok: false, error: 'Missing or invalid workspace "version" field.' };
   }
-  if (version !== WORKSPACE_JSON_VERSION) {
+  if (!WORKSPACE_JSON_IMPORT_VERSIONS.includes(version as (typeof WORKSPACE_JSON_IMPORT_VERSIONS)[number])) {
     return {
       ok: false,
-      error: `Unsupported workspace format version (${version}). This app only imports version ${WORKSPACE_JSON_VERSION}.`,
+      error: `Unsupported workspace format version (${version}). This app imports versions ${WORKSPACE_JSON_IMPORT_VERSIONS.join(" and ")}.`,
     };
   }
 
